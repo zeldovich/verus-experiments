@@ -4,6 +4,7 @@ pub mod seq_helper;
 pub mod frac;
 pub mod logatom;
 pub mod pairdisk;
+pub mod frac_ptsto;
 
 // Hamming-based CRC specs and proofs.
 pub mod hamming;

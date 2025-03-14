@@ -98,7 +98,9 @@ verus! {
 
         pub open spec fn valid(self, id: Loc, frac: int) -> bool
         {
-            self.inv() && self.id() == id && self.frac() == frac
+            &&& self.inv()
+            &&& self.id() == id
+            &&& self.frac() == frac
         }
 
         pub proof fn dummy() -> (tracked result: Self)
@@ -198,6 +200,15 @@ verus! {
             tracked_swap(&mut self.r, &mut r);
             let f = FractionalCarrier::<T, Total>::Value { v: v, n: Total as int };
             self.r = r.update(f);
+        }
+
+        pub proof fn bounded(tracked &self)
+            requires
+                self.inv(),
+            ensures
+                0 < self.frac() <= Total
+        {
+            self.r.validate()
         }
     }
 
