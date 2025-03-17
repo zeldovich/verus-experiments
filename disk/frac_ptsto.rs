@@ -103,8 +103,7 @@ verus! {
                     Inner::Absent { frac } => {
                         f.combine(frac);
                         f.bounded();
-                        assert(false);
-                        inner = Inner::Absent { frac: Frac::<T, Total>::dummy() };
+                        inner = proof_from_false();
                     },
                 };
             });
@@ -127,8 +126,7 @@ verus! {
                     Inner::Present { frac, ptsto: other } => {
                         let mut ptsto = ptsto;
                         ptsto.is_disjoint(&other);
-                        assert(false);
-                        inner = Inner::Absent { frac: Frac::<T, Total>::dummy() };
+                        inner = proof_from_false();
                     },
                     Inner::Absent { frac } => {
                         let tracked mut f = frac;
