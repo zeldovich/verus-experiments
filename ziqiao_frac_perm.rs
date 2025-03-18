@@ -1,12 +1,11 @@
 /// A fully verified frac-based ownership to share tracked ghost permissions.
 /// This is motivated by PCM from vstd and https://github.com/zeldovich/verus-experiments/blob/main/disk/frac.rs
 /// The state-machine proofs are motivated from the proof for Rc in vstd.
-///
+
 use state_machines_macros::*;
-use vstd::invariant::*;
 use vstd::multiset::*;
 use vstd::prelude::*;
-use vstd::shared::*;
+
 verus! {
 
 pub trait SumTrait {
@@ -40,23 +39,16 @@ proof fn lemma_sum<T: SumTrait>(s: Multiset<T>, elem: T)
     decreases s.len(),
 {
     let news = s.remove(elem);
+    let e = s.choose();
     if s.len() > 1 {
-        let e = s.choose();
         if e != elem {
-            assert(sum(s.remove(e)) + e.count() == sum(s));
             lemma_sum(s.remove(e), elem);
             lemma_sum(s.remove(elem), e);
             assert(s.remove(elem).remove(e) =~= s.remove(e).remove(elem));
-        } else {
-            assert(sum(s.remove(elem)) + elem.count() == sum(s));
         }
     } else {
         Multiset::lemma_is_singleton(s);
-        let e = s.choose();
         assert(s.contains(e));
-        assert(news.len() == 0);
-        assert(sum(news) == 0);
-        assert(e == elem);
     }
 }
 
@@ -67,7 +59,7 @@ impl SumTrait for nat {
 }
 
 } // verus!
-// ANCHOR: fields
+
 tokenized_state_machine!(RefCounter<Perm> {
     fields {
         #[sharding(storage_option)]
@@ -75,9 +67,6 @@ tokenized_state_machine!(RefCounter<Perm> {
 
         #[sharding(constant)]
         pub val: Perm,
-
-        #[sharding(variable)]
-        pub counter: nat,   // counting readers
 
         #[sharding(multiset)]
         pub reader: Multiset<Perm>,
@@ -96,8 +85,7 @@ tokenized_state_machine!(RefCounter<Perm> {
 
     #[invariant]
     pub fn frac_agrees_total(&self) -> bool {
-        self.frac.len() == self.counter &&
-        (self.counter > 0 ==> sum(self.frac) == self.total)
+        ( self.frac.len() > 0 ==> sum(self.frac) == self.total )
     }
 
     #[invariant]
@@ -107,7 +95,7 @@ tokenized_state_machine!(RefCounter<Perm> {
 
     #[invariant]
     pub fn reader_agrees_counters(&self) -> bool {
-        self.counter == self.reader.count(self.val)
+        self.frac.len() == self.reader.count(self.val)
     }
 
     #[invariant]
@@ -117,7 +105,7 @@ tokenized_state_machine!(RefCounter<Perm> {
 
     #[invariant]
     pub fn counter_agrees_empty_storage(&self) -> bool {
-        self.counter == 0 ==> self.storage.is_none()
+        self.frac.len() == 0 ==> self.storage.is_none()
     }
 
     init!{
@@ -125,7 +113,6 @@ tokenized_state_machine!(RefCounter<Perm> {
             require total > 0;
             init storage = Option::Some(x);
             init reader = Multiset::empty().insert(x);
-            init counter = 1;
             init val = x;
             init total = total;
             init frac = Multiset::empty().insert(total);
@@ -139,35 +126,17 @@ tokenized_state_machine!(RefCounter<Perm> {
         assert(sum(frac) == total);
     }
 
-    property!{
+    property! {
         reader_guard() {
             have reader >= {pre.val};
             guard storage >= Some(pre.val);
         }
     }
 
-    property!{
-        total_share_is_exclusive() {
-            have frac >= {pre.total};
-            assert(pre.counter == 1) by {
-                lemma_sum(pre.frac, pre.total);
-                if (pre.frac.len() > 1) {
-                    let newfrac = pre.frac.remove(pre.total);
-                    let e = newfrac.choose();
-                    assert(newfrac.contains(e));
-                    assert(pre.frac.contains(e));
-                    assert(e > 0);
-                    lemma_sum(pre.frac.remove(pre.total), e);
-                }
-            };
-        }
-    }
-
-    transition!{
+    transition! {
         do_share(shares: nat, new_shares: nat) {
             have reader >= {pre.val};
             require(0 < new_shares < shares);
-            update counter = pre.counter + 1;
             add reader += {pre.val};
             remove frac -= {shares};
             add frac += {new_shares};
@@ -175,10 +144,9 @@ tokenized_state_machine!(RefCounter<Perm> {
         }
     }
 
-    transition!{
+    transition! {
         take() {
             remove reader -= {pre.val};
-            update counter = (pre.counter - 1) as nat;
             remove frac -= {pre.total};
             withdraw storage -= Some(pre.val);
         }
@@ -221,34 +189,12 @@ tokenized_state_machine!(RefCounter<Perm> {
     transition!{
         merge(shares1: nat, shares2: nat) {
             let new_shares = (shares1 + shares2) as nat;
-            update counter = (pre.counter - 1) as nat;
             remove reader -= {pre.val};
             remove reader -= {pre.val};
             remove frac -= {shares1};
             remove frac -= {shares2};
             add reader += {pre.val};
             add frac += {new_shares};
-            assert ((pre.counter >= 2));
-            assert (new_shares == pre.total) <==> (pre.counter == 2) by {
-                assert(pre.frac.contains(shares1));
-                assert(pre.frac.contains(shares2));
-                let frac1 = pre.frac.remove(shares1);
-                let frac2 = frac1.remove(shares2);
-                lemma_sum(pre.frac, shares1);
-                lemma_sum(frac1, shares2);
-                lemma_sum_insert(frac2, (shares1 + shares2) as nat);
-                if new_shares == pre.total {
-                    if pre.counter > 2 {
-                        let e = frac2.choose();
-                        assert(frac2.contains(e));
-                        assert(pre.frac.contains(e));
-                        lemma_sum(frac2, e);
-                    }
-                }
-                if pre.counter == 2 {
-                    assert(frac2.len() == 0);
-                }
-            };
         }
     }
 
@@ -277,18 +223,6 @@ tokenized_state_machine!(RefCounter<Perm> {
 #[cfg(verus_keep_ghost)]
 verus! {
 
-pub tracked struct TrackedReaderCounter<T> {
-    pub counter: RefCounter::counter<T>,
-}
-
-struct TrackedReaderCounterInv;
-
-impl<T> TrackedReaderCounter<T> {
-    pub open spec fn wf(&self, inst: RefCounter::Instance<T>, total: nat) -> bool {
-        &&& inst.id() == self.counter.instance_id()
-    }
-}
-
 struct_with_invariants!{
 /// A `tracked ghost` container that you can put a ghost object in.
 /// A `Shared<T>` is duplicable and lets you get a `&T` out.
@@ -296,7 +230,6 @@ pub tracked struct FracPerm<T> {
     tracked inst: RefCounter::Instance<T>,
     tracked reader: RefCounter::reader<T>,
     tracked frac: RefCounter::frac<T>,
-    tracked inv_shares: Shared<LocalInvariant<_, TrackedReaderCounter<T>, _>>,
     ghost shares: nat,
     ghost total: nat,
 }
@@ -308,12 +241,6 @@ spec fn wf(self) -> bool {
         &&& self.total == self.inst.total()
         &&& self.frac.element() == self.shares
         &&& self.frac.instance_id() ==self.inst.id()
-    }
-    invariant on inv_shares with (inst, total)
-        specifically (self.inv_shares@)
-        is (v: TrackedReaderCounter<T>)
-    {
-        v.wf(inst, total)
     }
 }
 }
@@ -345,14 +272,12 @@ impl<T> FracPerm<T> {
         ensures
             s@ == t,
     {
-        let tracked (Tracked(inst), Tracked(counter), Tracked(mut readers), Tracked(mut fracs)) =
+        let tracked (Tracked(inst), Tracked(mut readers), Tracked(mut fracs)) =
             RefCounter::Instance::initialize_once(t, total, Some(t));
         let tracked reader = readers.remove(t);
         let tracked frac = fracs.remove(total);
         let shares = total;
-        let tracked inv = LocalInvariant::new((inst, total), TrackedReaderCounter { counter }, 0);
-        let tracked inv_shares = Shared::new(inv);
-        FracPerm { inst, reader, frac, inv_shares, shares, total }
+        FracPerm { inst, reader, frac, shares, total }
     }
 
     pub proof fn borrow(tracked &self) -> (tracked t: &T)
@@ -364,7 +289,7 @@ impl<T> FracPerm<T> {
         self.inst.reader_guard(&self.reader)
     }
 
-    pub proof fn share(tracked self, n: nat, tracked credit: OpenInvariantCredit) -> (tracked ret: (
+    pub proof fn share(tracked self, n: nat) -> (tracked ret: (
         Self,
         Self,
     ))
@@ -379,30 +304,23 @@ impl<T> FracPerm<T> {
             self.id() == ret.0.id(),
             self.id() == ret.1.id(),
             ret.0.shares() + ret.1.shares() == self.shares(),
-        opens_invariants any
     {
-        let tracked FracPerm { mut inst, mut reader, mut frac, mut shares, total, mut inv_shares } =
-            self;
+        let tracked FracPerm { mut inst, mut reader, mut frac, mut shares, total } = self;
         let tracked mut reader1;
         let tracked mut reader2;
         let tracked mut frac1;
         let tracked mut frac2;
-        open_local_invariant_in_proof!(
-            credit => inv_shares.borrow() => g => {
-            let tracked (Tracked(r), Tracked(f1), Tracked(f2)) = inst.do_share(shares, n, &mut g.counter, &reader, frac);
+            let tracked (Tracked(r), Tracked(f1), Tracked(f2)) = inst.do_share(shares, n, &reader, frac);
             reader1 = reader;
             reader2 = r;
             frac1 = f1;
             frac2 = f2;
-            }
-        );
         let tracked left = FracPerm {
             inst,
             reader: reader1,
             frac: frac1,
             shares: n,
             total,
-            inv_shares: inv_shares.clone(),
         };
         let tracked right = FracPerm {
             inst,
@@ -410,7 +328,6 @@ impl<T> FracPerm<T> {
             frac: frac2,
             shares: (shares - n) as nat,
             total,
-            inv_shares,
         };
         (left, right)
     }
@@ -418,7 +335,6 @@ impl<T> FracPerm<T> {
     pub proof fn merge(
         tracked self,
         tracked other: Self,
-        tracked credit: OpenInvariantCredit,
     ) -> (tracked ret: Self)
         requires
             self.well_formed(),
@@ -431,44 +347,27 @@ impl<T> FracPerm<T> {
             ret@ == self@,
             ret.shares() == self.shares() + other.shares(),
             ret.well_formed(),
-        opens_invariants any
     {
         let new_shares = self.shares + other.shares;
         let total = self.total;
-        let tracked FracPerm { mut inst, mut reader, mut frac, mut shares, total, mut inv_shares } =
-            self;
+        let tracked FracPerm { mut inst, mut reader, mut frac, mut shares, total } = self;
         let oldself = self;
-        open_local_invariant_in_proof!(
-            credit => inv_shares.borrow() => g => {
-                assert(g.wf(inst, total));
-                let old_counter = g.counter.value();
-                let tracked (Tracked(new_reader), Tracked(new_frac)) = inst.merge(shares, other.shares, &mut g.counter, reader, other.reader, frac, other.frac);
+                let tracked (Tracked(new_reader), Tracked(new_frac)) = inst.merge(shares, other.shares, reader, other.reader, frac, other.frac);
                 reader = new_reader;
                 frac = new_frac;
-                let counter = g.counter.value();
-            }
-        );
         shares = new_shares;
-        FracPerm { inst, reader, frac, shares, total, inv_shares }
+        FracPerm { inst, reader, frac, shares, total }
     }
 
-    pub proof fn extract(tracked self, tracked credit: OpenInvariantCredit) -> (tracked ret: T)
+    pub proof fn extract(tracked self) -> (tracked ret: T)
         requires
             self.well_formed(),
             self.shares() == self.total(),
         ensures
             ret == self@,
-        opens_invariants any
     {
-        let tracked mut ret;
-        let tracked FracPerm { mut inst, mut reader, mut frac, mut shares, total, mut inv_shares } =
-            self;
-        open_local_invariant_in_proof!(
-            credit => inv_shares.borrow() => g => {
-                ret = inst.take(&mut g.counter, reader, frac)
-            }
-        );
-        ret
+        let tracked FracPerm { mut inst, mut reader, mut frac, mut shares, total } = self;
+        inst.take(reader, frac)
     }
 }
 
