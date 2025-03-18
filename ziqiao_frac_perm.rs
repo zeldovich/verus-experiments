@@ -79,18 +79,13 @@ tokenized_state_machine!(RefCounter<Perm> {
     }
 
     #[invariant]
-    pub fn frac_agrees_non_zero(&self) -> bool {
+    pub fn frac_positive(&self) -> bool {
         forall |s| #[trigger]self.frac.contains(s) ==> s > 0
     }
 
     #[invariant]
     pub fn frac_agrees_total(&self) -> bool {
-        ( self.frac.len() > 0 ==> sum(self.frac) == self.total )
-    }
-
-    #[invariant]
-    pub fn reader_agrees_storage(&self) -> bool {
-        (self.storage.is_some() ==> self.storage == Some(self.val))
+        self.storage.is_some() ==> sum(self.frac) == self.total
     }
 
     #[invariant]
@@ -100,12 +95,7 @@ tokenized_state_machine!(RefCounter<Perm> {
 
     #[invariant]
     pub fn counter_agrees_storage(&self) -> bool {
-        self.reader.count(self.val) > 0 ==> self.storage == Some(self.val)
-    }
-
-    #[invariant]
-    pub fn counter_agrees_empty_storage(&self) -> bool {
-        self.frac.len() == 0 ==> self.storage.is_none()
+        self.reader.contains(self.val) ==> self.storage == Some(self.val)
     }
 
     init!{
@@ -123,7 +113,6 @@ tokenized_state_machine!(RefCounter<Perm> {
     fn initialize_once_inductive(post: Self, x: Perm, total: nat) {
         let frac = Multiset::<nat>::empty().insert(total);
         lemma_sum(frac, total);
-        assert(sum(frac) == total);
     }
 
     property! {
@@ -154,8 +143,6 @@ tokenized_state_machine!(RefCounter<Perm> {
 
     #[inductive(take)]
     fn take_inductive(pre: Self, post: Self) {
-        assert(pre.reader.count(pre.val) > 0);
-        assert(pre.frac.count(pre.total) > 0);
         lemma_sum(pre.frac, pre.total);
         let frac1 = pre.frac.remove(pre.total);
         if pre.frac.len() > 1 {
@@ -171,10 +158,6 @@ tokenized_state_machine!(RefCounter<Perm> {
 
     #[inductive(do_share)]
     fn do_share_inductive(pre: Self, post: Self, shares: nat, new_shares: nat) {
-        assert(pre.frac.count(shares) > 0);
-        assert(pre.reader.count(pre.val) > 0);
-        assert(pre.storage == Option::Some(pre.val));
-        assert(pre.storage.is_Some());
         let frac1 = pre.frac.remove(shares);
         let frac2 = frac1.insert(new_shares);
         lemma_sum(pre.frac, shares);
@@ -203,11 +186,7 @@ tokenized_state_machine!(RefCounter<Perm> {
     fn merge_inductive(pre: Self, post: Self, shares1: nat, shares2: nat) {
         let x = pre.val;
         let new_shares = (shares1 + shares2) as nat;
-        assert(pre.reader.count(x) > 0);
-        assert(pre.storage == Option::Some(x));
-        assert(pre.frac.contains(shares1));
         assert(pre.frac.contains(shares2));
-        assert(shares1 + shares2 > 0);
         let frac1 = pre.frac.remove(shares1);
         let frac2 = frac1.remove(shares2);
         lemma_sum(pre.frac, shares1);
@@ -230,17 +209,12 @@ pub tracked struct FracPerm<T> {
     tracked inst: RefCounter::Instance<T>,
     tracked reader: RefCounter::reader<T>,
     tracked frac: RefCounter::frac<T>,
-    ghost shares: nat,
-    ghost total: nat,
 }
 spec fn wf(self) -> bool {
     predicate {
         &&& self.reader.instance_id() == self.inst.id()
         &&& self.reader.element() == self.inst.val()
-        &&& self.total >= self.shares > 0
-        &&& self.total == self.inst.total()
-        &&& self.frac.element() == self.shares
-        &&& self.frac.instance_id() ==self.inst.id()
+        &&& self.frac.instance_id() == self.inst.id()
     }
 }
 }
@@ -255,11 +229,11 @@ impl<T> FracPerm<T> {
     }
 
     pub closed spec fn shares(&self) -> nat {
-        self.shares
+        self.frac.element()
     }
 
     pub closed spec fn total(&self) -> nat {
-        self.total
+        self.inst.total()
     }
 
     pub closed spec fn well_formed(&self) -> bool {
@@ -276,8 +250,7 @@ impl<T> FracPerm<T> {
             RefCounter::Instance::initialize_once(t, total, Some(t));
         let tracked reader = readers.remove(t);
         let tracked frac = fracs.remove(total);
-        let shares = total;
-        FracPerm { inst, reader, frac, shares, total }
+        FracPerm { inst, reader, frac }
     }
 
     pub proof fn borrow(tracked &self) -> (tracked t: &T)
@@ -305,29 +278,16 @@ impl<T> FracPerm<T> {
             self.id() == ret.1.id(),
             ret.0.shares() + ret.1.shares() == self.shares(),
     {
-        let tracked FracPerm { mut inst, mut reader, mut frac, mut shares, total } = self;
-        let tracked mut reader1;
-        let tracked mut reader2;
-        let tracked mut frac1;
-        let tracked mut frac2;
-            let tracked (Tracked(r), Tracked(f1), Tracked(f2)) = inst.do_share(shares, n, &reader, frac);
-            reader1 = reader;
-            reader2 = r;
-            frac1 = f1;
-            frac2 = f2;
+        let tracked (Tracked(r), Tracked(f1), Tracked(f2)) = self.inst.do_share(self.shares(), n, &self.reader, self.frac);
         let tracked left = FracPerm {
-            inst,
-            reader: reader1,
-            frac: frac1,
-            shares: n,
-            total,
+            inst: self.inst,
+            reader: self.reader,
+            frac: f1,
         };
         let tracked right = FracPerm {
-            inst,
-            reader: reader2,
-            frac: frac2,
-            shares: (shares - n) as nat,
-            total,
+            inst: self.inst,
+            reader: r,
+            frac: f2,
         };
         (left, right)
     }
@@ -348,15 +308,8 @@ impl<T> FracPerm<T> {
             ret.shares() == self.shares() + other.shares(),
             ret.well_formed(),
     {
-        let new_shares = self.shares + other.shares;
-        let total = self.total;
-        let tracked FracPerm { mut inst, mut reader, mut frac, mut shares, total } = self;
-        let oldself = self;
-                let tracked (Tracked(new_reader), Tracked(new_frac)) = inst.merge(shares, other.shares, reader, other.reader, frac, other.frac);
-                reader = new_reader;
-                frac = new_frac;
-        shares = new_shares;
-        FracPerm { inst, reader, frac, shares, total }
+        let tracked (Tracked(new_reader), Tracked(new_frac)) = self.inst.merge(self.shares(), other.shares(), self.reader, other.reader, self.frac, other.frac);
+        FracPerm { inst: self.inst, reader: new_reader, frac: new_frac }
     }
 
     pub proof fn extract(tracked self) -> (tracked ret: T)
@@ -366,7 +319,7 @@ impl<T> FracPerm<T> {
         ensures
             ret == self@,
     {
-        let tracked FracPerm { mut inst, mut reader, mut frac, mut shares, total } = self;
+        let tracked FracPerm { mut inst, mut reader, mut frac } = self;
         inst.take(reader, frac)
     }
 }
