@@ -52,9 +52,9 @@ proof fn lemma_sum<T: SumTrait>(s: Multiset<T>, elem: T)
     }
 }
 
-impl SumTrait for nat {
+impl<T> SumTrait for (T, nat) {
     open spec fn count(&self) -> nat {
-        *self
+        self.1
     }
 }
 
@@ -66,131 +66,103 @@ tokenized_state_machine!(RefCounter<Perm> {
         pub storage: Option<Perm>,
 
         #[sharding(multiset)]
-        pub reader: Multiset<Perm>,
+        pub reader: Multiset<(Perm, nat)>,  // read token and number of shares
 
         #[sharding(constant)]
-        pub total: nat,     // Maximum number of shares
-
-        #[sharding(multiset)]
-        pub frac: Multiset<nat>, // assigned shares and must sum up to total.
+        pub total: nat,                     // maximum number of shares, must be sum of readers
     }
 
     #[invariant]
     pub fn frac_positive(&self) -> bool {
-        forall |s| #[trigger]self.frac.contains(s) ==> s > 0
+        forall |s| #[trigger] self.reader.count(s) > 0 ==> s.1 > 0
     }
 
     #[invariant]
     pub fn frac_agrees_total(&self) -> bool {
-        self.storage.is_some() ==> sum(self.frac) == self.total
-    }
-
-    #[invariant]
-    pub fn reader_agrees_counters(&self) -> bool {
-        self.frac.len() == self.reader.len()
+        self.storage.is_some() ==> sum(self.reader) == self.total
     }
 
     #[invariant]
     pub fn reader_agrees_storage(&self) -> bool {
-        forall |v| #[trigger] self.reader.count(v) > 0 ==> self.storage == Some(v)
+        forall |v| #[trigger] self.reader.count(v) > 0 ==> self.storage == Some(v.0)
     }
 
     init!{
         initialize_once(x: Perm, total: nat) {
             require total > 0;
             init storage = Option::Some(x);
-            init reader = Multiset::empty().insert(x);
+            init reader = Multiset::empty().insert((x, total));
             init total = total;
-            init frac = Multiset::empty().insert(total);
         }
     }
 
     #[inductive(initialize_once)]
     fn initialize_once_inductive(post: Self, x: Perm, total: nat) {
-        let frac = Multiset::<nat>::empty().insert(total);
-        lemma_sum(frac, total);
+        let frac = Multiset::empty().insert((x, total));
+        lemma_sum(frac, (x, total));
     }
 
     property! {
-        reader_guard(x: Perm) {
-            have reader >= {x};
+        reader_guard(x: Perm, shares: nat) {
+            have reader >= {(x, shares)};
             guard storage >= Some(x);
         }
     }
 
     transition! {
         do_share(x: Perm, shares: nat, new_shares: nat) {
-            have reader >= {x};
+            remove reader -= {(x, shares)};
             require(0 < new_shares < shares);
-            add reader += {x};
-            remove frac -= {shares};
-            add frac += {new_shares};
-            add frac += {(shares - new_shares) as nat};
+            add reader += {(x, new_shares)};
+            add reader += {(x, (shares - new_shares) as nat)};
         }
     }
 
     transition! {
         take(x: Perm) {
-            remove reader -= {x};
-            remove frac -= {pre.total};
+            remove reader -= {(x, pre.total)};
             withdraw storage -= Some(x);
         }
     }
 
     #[inductive(take)]
     fn take_inductive(pre: Self, post: Self, x: Perm) {
-        lemma_sum(pre.frac, pre.total);
-        let frac1 = pre.frac.remove(pre.total);
-        if pre.frac.len() > 1 {
-            let e = frac1.choose();
-            assert(frac1.contains(e));
-            lemma_sum(frac1, e);
-        }
-        assert forall |s| #[trigger]post.frac.contains(s)
-        implies s > 0 by{
-            assert(pre.frac.contains(s));
+        lemma_sum(pre.reader, (x, pre.total));
+        let reader1 = pre.reader.remove((x, pre.total));
+        assert(reader1.len() == 0) by {
+            let e = reader1.choose();
+            if (reader1.contains(e)) {
+                lemma_sum(reader1, e);
+            }
         }
     }
 
     #[inductive(do_share)]
     fn do_share_inductive(pre: Self, post: Self, x: Perm, shares: nat, new_shares: nat) {
-        let frac1 = pre.frac.remove(shares);
-        let frac2 = frac1.insert(new_shares);
-        lemma_sum(pre.frac, shares);
-        lemma_sum_insert(frac1, new_shares);
-        lemma_sum_insert(frac2, (shares - new_shares) as nat);
-        assert forall |s| #[trigger]post.frac.contains(s)
-        implies s > 0 by{
-            assert(pre.frac.contains(s) || s == new_shares || s == (shares - new_shares) as nat);
-        }
+        let reader1 = pre.reader.remove((x, shares));
+        let reader2 = reader1.insert((x, new_shares));
+        lemma_sum(pre.reader, (x, shares));
+        lemma_sum_insert(reader1, (x, new_shares));
+        lemma_sum_insert(reader2, (x, (shares - new_shares) as nat));
     }
 
     transition!{
         merge(x: Perm, shares1: nat, shares2: nat) {
             let new_shares = (shares1 + shares2) as nat;
-            remove reader -= {x};
-            remove reader -= {x};
-            remove frac -= {shares1};
-            remove frac -= {shares2};
-            add reader += {x};
-            add frac += {new_shares};
+            remove reader -= {(x, shares1)};
+            remove reader -= {(x, shares2)};
+            add reader += {(x, new_shares)};
         }
     }
-
 
     #[inductive(merge)]
     fn merge_inductive(pre: Self, post: Self, x: Perm, shares1: nat, shares2: nat) {
         let new_shares = (shares1 + shares2) as nat;
-        assert(pre.frac.contains(shares2));
-        let frac1 = pre.frac.remove(shares1);
-        let frac2 = frac1.remove(shares2);
-        lemma_sum(pre.frac, shares1);
-        lemma_sum(frac1, shares2);
-        lemma_sum_insert(frac2, (shares1 + shares2) as nat);
-        assert forall |s| #[trigger]post.frac.contains(s)
-        implies s > 0 by{
-            assert(pre.frac.contains(s) || s == (shares1 + shares2) as nat);
-        };
+        let reader1 = pre.reader.remove((x, shares1));
+        let reader2 = reader1.remove((x, shares2));
+        lemma_sum(pre.reader, (x, shares1));
+        lemma_sum(reader1, (x, shares2));
+        lemma_sum_insert(reader2, (x, (shares1 + shares2) as nat));
     }
 });
 
@@ -203,12 +175,10 @@ struct_with_invariants!{
 pub tracked struct FracPerm<T> {
     tracked inst: RefCounter::Instance<T>,
     tracked reader: RefCounter::reader<T>,
-    tracked frac: RefCounter::frac<T>,
 }
 spec fn wf(self) -> bool {
     predicate {
-        &&& self.reader.instance_id() == self.inst.id()
-        &&& self.frac.instance_id() == self.inst.id()
+        self.reader.instance_id() == self.inst.id()
     }
 }
 }
@@ -219,11 +189,11 @@ impl<T> FracPerm<T> {
     }
 
     pub closed spec fn view(self) -> T {
-        self.reader.element()
+        self.reader.element().0
     }
 
     pub closed spec fn shares(&self) -> nat {
-        self.frac.element()
+        self.reader.element().1
     }
 
     pub closed spec fn total(&self) -> nat {
@@ -240,11 +210,10 @@ impl<T> FracPerm<T> {
         ensures
             s@ == t,
     {
-        let tracked (Tracked(inst), Tracked(mut readers), Tracked(mut fracs)) =
+        let tracked (Tracked(inst), Tracked(mut readers)) =
             RefCounter::Instance::initialize_once(t, total, Some(t));
-        let tracked reader = readers.remove(t);
-        let tracked frac = fracs.remove(total);
-        FracPerm { inst, reader, frac }
+        let tracked reader = readers.remove((t, total));
+        FracPerm { inst, reader }
     }
 
     pub proof fn borrow(tracked &self) -> (tracked t: &T)
@@ -253,7 +222,7 @@ impl<T> FracPerm<T> {
         ensures
             *t == self@,
     {
-        self.inst.reader_guard(self.reader.element(), &self.reader)
+        self.inst.reader_guard(self.view(), self.shares(), &self.reader)
     }
 
     pub proof fn share(tracked self, n: nat) -> (tracked ret: (
@@ -272,16 +241,14 @@ impl<T> FracPerm<T> {
             self.id() == ret.1.id(),
             ret.0.shares() + ret.1.shares() == self.shares(),
     {
-        let tracked (Tracked(r), Tracked(f1), Tracked(f2)) = self.inst.do_share(self.reader.element(), self.shares(), n, &self.reader, self.frac);
+        let tracked (Tracked(r1), Tracked(r2)) = self.inst.do_share(self.view(), self.shares(), n, self.reader);
         let tracked left = FracPerm {
             inst: self.inst,
-            reader: self.reader,
-            frac: f1,
+            reader: r1,
         };
         let tracked right = FracPerm {
             inst: self.inst,
-            reader: r,
-            frac: f2,
+            reader: r2,
         };
         (left, right)
     }
@@ -302,8 +269,8 @@ impl<T> FracPerm<T> {
             ret.shares() == self.shares() + other.shares(),
             ret.well_formed(),
     {
-        let tracked (Tracked(new_reader), Tracked(new_frac)) = self.inst.merge(self.reader.element(), self.shares(), other.shares(), self.reader, other.reader, self.frac, other.frac);
-        FracPerm { inst: self.inst, reader: new_reader, frac: new_frac }
+        let tracked (new_reader) = self.inst.merge(self.view(), self.shares(), other.shares(), self.reader, other.reader);
+        FracPerm { inst: self.inst, reader: new_reader }
     }
 
     pub proof fn extract(tracked self) -> (tracked ret: T)
@@ -313,8 +280,8 @@ impl<T> FracPerm<T> {
         ensures
             ret == self@,
     {
-        let tracked FracPerm { mut inst, mut reader, mut frac } = self;
-        inst.take(reader.element(), reader, frac)
+        let tracked FracPerm { mut inst, mut reader } = self;
+        inst.take(reader.element().0, reader)
     }
 }
 
