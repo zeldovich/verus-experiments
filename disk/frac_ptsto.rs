@@ -2,7 +2,7 @@ use vstd::prelude::*;
 use vstd::raw_ptr::*;
 use vstd::invariant::*;
 
-use crate::frac::*;
+use super::frac::*;
 
 use std::sync::Arc;
 
