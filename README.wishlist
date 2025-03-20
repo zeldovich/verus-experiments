@@ -1,10 +1,5 @@
 Verus feature wishlist:
 
-- Specify opens_invariants as a vstd::Set.  Seems to require some redesign
-  because inv_masks.rs outputs AIR, which is too low-level to talk about
-  invoking a Rust function, so the invariant namespace set reasoning would
-  have to get lifted higher up.  Thus might go together with the next item:
-
 - Allow a function to leave invariants open on return, and allow a function
   to close invariants that were left open, perhaps by tracking the thread's
   set of open invariants as an explicit value.
