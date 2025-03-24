@@ -1,0 +1,12 @@
+[package]
+name = "sl"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+vstd = { git = "https://github.com/verus-lang/verus", rev = "cf72bcc79df1629e8aa82233a389101918a2cac7" }
+builtin = { git = "https://github.com/verus-lang/verus", rev = "cf72bcc79df1629e8aa82233a389101918a2cac7" }
+builtin_macros = { git = "https://github.com/verus-lang/verus", rev = "cf72bcc79df1629e8aa82233a389101918a2cac7" }
+
+[package.metadata.verus]
+verify = true

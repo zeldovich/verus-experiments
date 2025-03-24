@@ -17,7 +17,7 @@ verus! {
         },
     }
 
-    struct Pred {
+    pub struct Pred {
         pub frac_id: int,
         pub ptsto_addr: usize,
     }
@@ -124,7 +124,7 @@ verus! {
             open_atomic_invariant_in_proof!(credit => &self.inv => inner => {
                 match inner {
                     Inner::Present { frac, ptsto: other } => {
-                        let mut ptsto = ptsto;
+                        let tracked mut ptsto = ptsto;
                         ptsto.is_disjoint(&other);
                         inner = proof_from_false();
                     },
