@@ -27,7 +27,7 @@ verus! {
         }
     }
 
-    pub fn main() {
+    pub fn typeinv_example() {
         let x = T{a: 0u8};
         let y = test(&x);
         proof {
