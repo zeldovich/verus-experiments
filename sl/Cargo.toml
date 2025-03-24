@@ -7,6 +7,10 @@ edition = "2021"
 vstd = { git = "https://github.com/verus-lang/verus", rev = "cf72bcc79df1629e8aa82233a389101918a2cac7" }
 builtin = { git = "https://github.com/verus-lang/verus", rev = "cf72bcc79df1629e8aa82233a389101918a2cac7" }
 builtin_macros = { git = "https://github.com/verus-lang/verus", rev = "cf72bcc79df1629e8aa82233a389101918a2cac7" }
+state_machines_macros = { git = "https://github.com/verus-lang/verus", rev = "cf72bcc79df1629e8aa82233a389101918a2cac7" }
 
 [package.metadata.verus]
 verify = true
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(verus_keep_ghost)'] }
