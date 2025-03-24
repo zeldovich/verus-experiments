@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use super::disk::disk_wrap::*;
-use super::disk::logatom::*;
-use super::disk::seq_view::*;
-use super::disk::frac::*;
-use super::disk::seq_helper::*;
+use sl::disk_wrap::*;
+use sl::logatom::*;
+use sl::seq_view::*;
+use sl::frac::*;
+use sl::seq_helper::*;
 
 use vstd::prelude::*;
 use vstd::invariant::*;

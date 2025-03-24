@@ -1,14 +1,14 @@
-mod disk;
-mod disk_sep_inv;
+mod inv;
 
 use std::sync::Arc;
 
-use disk::vecdisk::*;
-use disk::disk_wrap::*;
-use disk::seq_view::*;
-use disk::frac::*;
-use disk::disk_wrap_lib::*;
-use disk_sep_inv::*;
+use sl::vecdisk::*;
+use sl::disk_wrap::*;
+use sl::seq_view::*;
+use sl::frac::*;
+use sl::disk_wrap_lib::*;
+
+use inv::*;
 
 use vstd::prelude::*;
 use vstd::invariant::*;

@@ -1,15 +1,13 @@
 use builtin::*;
 use vstd::prelude::*;
 
-mod disk;
-
-use disk::frac::Frac;
-use disk::logatom;
-use disk::pairdisk::DiskView;
-use disk::pairdisk::MemCrashView;
-use disk::pairdisk::view_write;
-use disk::pairdisk::Disk;
-use disk::pairdisk::DiskWriteOp;
+use sl::frac::Frac;
+use sl::logatom;
+use sl::pairdisk::DiskView;
+use sl::pairdisk::MemCrashView;
+use sl::pairdisk::view_write;
+use sl::pairdisk::Disk;
+use sl::pairdisk::DiskWriteOp;
 
 verus! {
     pub type AbsView = u8;

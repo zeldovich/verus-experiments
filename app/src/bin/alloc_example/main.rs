@@ -1,7 +1,5 @@
-mod disk;
-
-use disk::allocator::*;
-use disk::seq_view::*;
+use sl::allocator::*;
+use sl::seq_view::*;
 
 use std::collections::HashSet;
 
@@ -10,7 +8,7 @@ use vstd::prelude::*;
 verus! {
     broadcast use vstd::std_specs::hash::group_hash_axioms;
 
-    struct Pred {
+    pub struct Pred {
         pub ghost id: int,
     }
 

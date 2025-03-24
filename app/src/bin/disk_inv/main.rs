@@ -3,18 +3,16 @@ use vstd::prelude::*;
 use vstd::invariant::*;
 use std::sync::Arc;
 
-mod disk;
-
-use disk::frac::Frac;
-use disk::logatom;
-use disk::pairdisk::DiskView;
-use disk::pairdisk::MemCrashView;
-use disk::pairdisk::view_read;
-use disk::pairdisk::view_write;
-use disk::pairdisk::Disk;
-use disk::pairdisk::DiskReadOp;
-use disk::pairdisk::DiskWriteOp;
-use disk::pairdisk::DiskBarrierOp;
+use sl::frac::Frac;
+use sl::logatom;
+use sl::pairdisk::DiskView;
+use sl::pairdisk::MemCrashView;
+use sl::pairdisk::view_read;
+use sl::pairdisk::view_write;
+use sl::pairdisk::Disk;
+use sl::pairdisk::DiskReadOp;
+use sl::pairdisk::DiskWriteOp;
+use sl::pairdisk::DiskBarrierOp;
 
 verus! {
     pub type AbsView = u8;
