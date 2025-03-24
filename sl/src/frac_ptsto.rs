@@ -7,13 +7,13 @@ use super::frac::*;
 use std::sync::Arc;
 
 verus! {
-    enum Inner<T, const Total: u64> {
+    enum Inner<T, const TOTAL: u64> {
         Present {
-            tracked frac: Frac<T, Total>,
+            tracked frac: Frac<T, TOTAL>,
             ptsto: PointsTo<T>,
         },
         Absent {
-            tracked frac: Frac<T, Total>,
+            tracked frac: Frac<T, TOTAL>,
         },
     }
 
@@ -22,8 +22,8 @@ verus! {
         pub ptsto_addr: usize,
     }
 
-    impl<T, const Total: u64> InvariantPredicate<Pred, Inner<T, Total>> for Pred {
-        open spec fn inv(k: Pred, inner: Inner<T, Total>) -> bool {
+    impl<T, const TOTAL: u64> InvariantPredicate<Pred, Inner<T, TOTAL>> for Pred {
+        open spec fn inv(k: Pred, inner: Inner<T, TOTAL>) -> bool {
             match inner {
                 Inner::Present { frac, ptsto } => {
                     &&& frac.valid(k.frac_id, 1)
@@ -31,29 +31,29 @@ verus! {
                     &&& ptsto.ptr() as usize == k.ptsto_addr
                 },
                 Inner::Absent { frac } => {
-                    &&& frac.valid(k.frac_id, Total as int)
+                    &&& frac.valid(k.frac_id, TOTAL as int)
                 },
             }
         }
     }
 
-    struct Holder<T, const Total: u64> {
-        inv: Arc<AtomicInvariant<Pred, Inner<T, Total>, Pred>>,
+    struct Holder<T, const TOTAL: u64> {
+        inv: Arc<AtomicInvariant<Pred, Inner<T, TOTAL>, Pred>>,
     }
 
-    impl<T, const Total: u64> Holder<T, Total> {
-        proof fn new(tracked ptsto: PointsTo<T>, ns: int) -> (tracked result: (Holder<T, Total>, Frac<T, Total>))
+    impl<T, const TOTAL: u64> Holder<T, TOTAL> {
+        proof fn new(tracked ptsto: PointsTo<T>, ns: int) -> (tracked result: (Holder<T, TOTAL>, Frac<T, TOTAL>))
             requires
-                Total > 1,
+                TOTAL > 1,
                 size_of::<T>() > 0,
             ensures
                 result.0.inv(),
                 result.0.namespace() == ns,
                 result.0.ptsto_addr() == ptsto.ptr() as usize,
-                result.1.valid(result.0.frac_id(), Total-1),
+                result.1.valid(result.0.frac_id(), TOTAL-1),
         {
-            let tracked mut frac = Frac::<T, Total>::new(ptsto.value());
-            let tracked frac_res = frac.split(Total-1);
+            let tracked mut frac = Frac::<T, TOTAL>::new(ptsto.value());
+            let tracked frac_res = frac.split(TOTAL-1);
             let tracked inner = Inner::Present{ frac, ptsto };
             let pred = Pred{
                 frac_id: frac.id(),
@@ -67,7 +67,7 @@ verus! {
         }
 
         pub closed spec fn inv(self) -> bool {
-            &&& Total > 1
+            &&& TOTAL > 1
             &&& size_of::<T>() > 0
         }
 
@@ -83,10 +83,10 @@ verus! {
             self.inv.namespace()
         }
 
-        pub proof fn extract(tracked self, tracked mut f: Frac<T, Total>, tracked credit: OpenInvariantCredit) -> (result: PointsTo<T>)
+        pub proof fn extract(tracked self, tracked mut f: Frac<T, TOTAL>, tracked credit: OpenInvariantCredit) -> (result: PointsTo<T>)
             requires
                 self.inv(),
-                f.valid(self.frac_id(), Total-1),
+                f.valid(self.frac_id(), TOTAL-1),
             ensures
                 result.ptr() as usize == self.ptsto_addr(),
             opens_invariants
@@ -110,12 +110,12 @@ verus! {
             result
         }
 
-        pub proof fn deposit(tracked self, tracked ptsto: PointsTo<T>, tracked credit: OpenInvariantCredit) -> (result: Frac<T, Total>)
+        pub proof fn deposit(tracked self, tracked ptsto: PointsTo<T>, tracked credit: OpenInvariantCredit) -> (result: Frac<T, TOTAL>)
             requires
                 self.inv(),
                 ptsto.ptr() as usize == self.ptsto_addr(),
             ensures
-                result.valid(self.frac_id(), Total-1),
+                result.valid(self.frac_id(), TOTAL-1),
                 result@ == ptsto.value(),
             opens_invariants
                 [ self.namespace() ]
@@ -131,7 +131,7 @@ verus! {
                     Inner::Absent { frac } => {
                         let tracked mut f = frac;
                         f.update(ptsto.value());
-                        result = f.split(Total-1);
+                        result = f.split(TOTAL-1);
                         inner = Inner::Present {
                             frac: f,
                             ptsto: ptsto,

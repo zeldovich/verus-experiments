@@ -60,7 +60,7 @@ impl<T> SumTrait for (T, nat) {
 
 } // verus!
 
-tokenized_state_machine!(RefCounter<Perm> {
+tokenized_state_machine!(ref_counter<Perm> {
     fields {
         #[sharding(storage_option)]
         pub storage: Option<Perm>,
@@ -173,8 +173,8 @@ struct_with_invariants!{
 /// A `tracked ghost` container that you can put a ghost object in.
 /// A `Shared<T>` is duplicable and lets you get a `&T` out.
 pub tracked struct FracPerm<T> {
-    tracked inst: RefCounter::Instance<T>,
-    tracked reader: RefCounter::reader<T>,
+    tracked inst: ref_counter::Instance<T>,
+    tracked reader: ref_counter::reader<T>,
 }
 spec fn wf(self) -> bool {
     predicate {
@@ -211,7 +211,7 @@ impl<T> FracPerm<T> {
             s@ == t,
     {
         let tracked (Tracked(inst), Tracked(mut readers)) =
-            RefCounter::Instance::initialize_once(t, total, Some(t));
+            ref_counter::Instance::initialize_once(t, total, Some(t));
         let tracked reader = readers.remove((t, total));
         FracPerm { inst, reader }
     }

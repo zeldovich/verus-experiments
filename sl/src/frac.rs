@@ -5,29 +5,29 @@ use vstd::modes::*;
 
 // This implements a resource for fractional ownership of a ghost variable.
 // The fractions are represented as some number out of a compile-time const
-// Total value; you can have any fractions from 1 up to Total, and if you
-// have Total, you can update the ghost variable.
+// TOTAL value; you can have any fractions from 1 up to TOTAL, and if you
+// have TOTAL, you can update the ghost variable.
 
 verus! {
     // Too bad that `nat` and `int` are forbidden as the type of a const generic parameter
-    enum FractionalCarrier<T, const Total: u64> {
+    enum FractionalCarrier<T, const TOTAL: u64> {
         Value { v: T, n: int },
         Empty,
         Invalid,
     }
 
-    impl<T, const Total: u64> FractionalCarrier<T, Total> {
+    impl<T, const TOTAL: u64> FractionalCarrier<T, TOTAL> {
         spec fn new(v: T) -> Self {
-            FractionalCarrier::Value { v: v, n: Total as int }
+            FractionalCarrier::Value { v: v, n: TOTAL as int }
         }
     }
 
-    impl<T, const Total: u64> PCM for FractionalCarrier<T, Total> {
+    impl<T, const TOTAL: u64> PCM for FractionalCarrier<T, TOTAL> {
         closed spec fn valid(self) -> bool {
             match self {
                 FractionalCarrier::Invalid => false,
                 FractionalCarrier::Empty => true,
-                FractionalCarrier::Value { v: v, n: n } => 0 < n <= Total,
+                FractionalCarrier::Value { v: v, n: n } => 0 < n <= TOTAL,
             }
         }
 
@@ -71,11 +71,11 @@ verus! {
         }
     }
 
-    pub struct Frac<T, const Total: u64 = 2> {
-        r: Resource<FractionalCarrier<T, Total>>,
+    pub struct Frac<T, const TOTAL: u64 = 2> {
+        r: Resource<FractionalCarrier<T, TOTAL>>,
     }
 
-    impl<T, const Total: u64> Frac<T, Total> {
+    impl<T, const TOTAL: u64> Frac<T, TOTAL> {
         pub closed spec fn inv(self) -> bool
         {
             self.r.value() is Value
@@ -111,13 +111,13 @@ verus! {
 
         pub proof fn new(v: T) -> (tracked result: Self)
             requires
-                Total > 0,
+                TOTAL > 0,
             ensures
                 result.inv(),
-                result.frac() == Total as int,
+                result.frac() == TOTAL as int,
                 result@ == v,
         {
-            let f = FractionalCarrier::<T, Total>::new(v);
+            let f = FractionalCarrier::<T, TOTAL>::new(v);
             let tracked r = Resource::alloc(f);
             Frac { r }
         }
@@ -189,7 +189,7 @@ verus! {
         pub proof fn update(tracked &mut self, v: T)
             requires
                 old(self).inv(),
-                old(self).frac() == Total,
+                old(self).frac() == TOTAL,
             ensures
                 self.id() == old(self).id(),
                 self.inv(),
@@ -198,7 +198,7 @@ verus! {
         {
             let tracked mut r = Resource::alloc(FractionalCarrier::unit());
             tracked_swap(&mut self.r, &mut r);
-            let f = FractionalCarrier::<T, Total>::Value { v: v, n: Total as int };
+            let f = FractionalCarrier::<T, TOTAL>::Value { v: v, n: TOTAL as int };
             self.r = r.update(f);
         }
 
@@ -206,7 +206,7 @@ verus! {
             requires
                 self.inv(),
             ensures
-                0 < self.frac() <= Total
+                0 < self.frac() <= TOTAL
         {
             self.r.validate()
         }

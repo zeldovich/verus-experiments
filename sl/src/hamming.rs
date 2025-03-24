@@ -42,6 +42,7 @@ verus! {
         }
     }
 
+    #[allow(non_snake_case)]
     pub open spec fn S<T>(s: Seq<T>) -> WSeq<T>
     {
         WSeq{
