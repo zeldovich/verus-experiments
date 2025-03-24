@@ -317,54 +317,54 @@ verus! {
         assert(crc@ == d1@.subrange(20, 28));
 
         {
-            let (mut bufR, Ghost(mut mask1)) = d1.read_range(10, 2);
-            let (mut bufR2, Ghost(maskB2)) = d1.read_range(12, 2);
-            let (mut crcR, Ghost(maskC1)) = d1.read_range(20, 3);
-            let (mut crcR2, Ghost(maskC2)) = d1.read_range(23, 5);
-            bufR.append(&mut bufR2);
-            crcR.append(&mut crcR2);
+            let (mut buf_r, Ghost(mut mask1)) = d1.read_range(10, 2);
+            let (mut buf_r2, Ghost(mask_b2)) = d1.read_range(12, 2);
+            let (mut crc_r, Ghost(mask_c1)) = d1.read_range(20, 3);
+            let (mut crc_r2, Ghost(mask_c2)) = d1.read_range(23, 5);
+            buf_r.append(&mut buf_r2);
+            crc_r.append(&mut crc_r2);
             proof {
-                mask1 = update_read_mask(mask1, maskB2, 12, 2);
-                mask1 = update_read_mask(mask1, maskC1, 20, 3);
-                mask1 = update_read_mask(mask1, maskC2, 23, 5);
+                mask1 = update_read_mask(mask1, mask_b2, 12, 2);
+                mask1 = update_read_mask(mask1, mask_c1, 20, 3);
+                mask1 = update_read_mask(mask1, mask_c2, 23, 5);
             }
 
-            assert(bufR@ == xor(d1@, and(mask1, d1.corrupt())).subrange(10, 14));
-            assert(crcR@ == xor(d1@, and(mask1, d1.corrupt())).subrange(20, 28));
+            assert(buf_r@ == xor(d1@, and(mask1, d1.corrupt())).subrange(10, 14));
+            assert(crc_r@ == xor(d1@, and(mask1, d1.corrupt())).subrange(20, 28));
 
-            let crc2 = crc64(bufR.as_slice());
-            if crc_equal(crcR.as_slice(), crc2.as_slice()) {
+            let crc2 = crc64(buf_r.as_slice());
+            if crc_equal(crc_r.as_slice(), crc2.as_slice()) {
                 proof {
                     let buf_addrs = seq![10, 11, 12, 13];
                     let crc_addrs = seq![20, 21, 22, 23, 24, 25, 26, 27];
                     popcnt_and(mask1, d1.corrupt());
-                    bytes_uncorrupted(bufR@, buf@, buf_addrs,
-                                    crcR@, crc@, crc_addrs,
+                    bytes_uncorrupted(buf_r@, buf@, buf_addrs,
+                                    crc_r@, crc@, crc_addrs,
                                     d1@, and(mask1, d1.corrupt()));
                 }
-                assert(bufR@ == buf@);
+                assert(buf_r@ == buf@);
             }
         }
 
         {
-            let mut bufR = d1.read_range2(10, 2);
-            let mut bufR2 = d1.read_range2(12, 2);
-            let mut crcR = d1.read_range2(20, 3);
-            let mut crcR2 = d1.read_range2(23, 5);
-            bufR.append(&mut bufR2);
-            crcR.append(&mut crcR2);
+            let mut buf_r = d1.read_range2(10, 2);
+            let mut buf_r2 = d1.read_range2(12, 2);
+            let mut crc_r = d1.read_range2(20, 3);
+            let mut crc_r2 = d1.read_range2(23, 5);
+            buf_r.append(&mut buf_r2);
+            crc_r.append(&mut crc_r2);
 
-            assert(d1.maybe_corrupted(bufR@, d1@.subrange(10, 14), seq![10, 11, 12, 13]));
-            assert(d1.maybe_corrupted(crcR@, d1@.subrange(20, 28), seq![20, 21, 22, 23, 24, 25, 26, 27]));
+            assert(d1.maybe_corrupted(buf_r@, d1@.subrange(10, 14), seq![10, 11, 12, 13]));
+            assert(d1.maybe_corrupted(crc_r@, d1@.subrange(20, 28), seq![20, 21, 22, 23, 24, 25, 26, 27]));
 
-            let crc2 = crc64(bufR.as_slice());
-            if crc_equal(crcR.as_slice(), crc2.as_slice()) {
+            let crc2 = crc64(buf_r.as_slice());
+            if crc_equal(crc_r.as_slice(), crc2.as_slice()) {
                 proof {
                     let buf_addrs = seq![10, 11, 12, 13];
                     let crc_addrs = seq![20, 21, 22, 23, 24, 25, 26, 27];
-                    d1.bytes_uncorrupted(bufR@, buf@, buf_addrs, crcR@, crc@, crc_addrs);
+                    d1.bytes_uncorrupted(buf_r@, buf@, buf_addrs, crc_r@, crc@, crc_addrs);
                 }
-                assert(bufR@ == buf@);
+                assert(buf_r@ == buf@);
             }
         }
     }
