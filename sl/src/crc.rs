@@ -7,7 +7,7 @@ verus! {
         spec_u64_to_le_bytes(spec_crc64_u64(bytes))
     }
 
-    pub closed spec fn spec_crc64_u64(bytes: Seq<u8>) -> u64;
+    pub uninterp spec fn spec_crc64_u64(bytes: Seq<u8>) -> u64;
 
     pub open spec fn spec_crc64_hamming_bound(len: nat) -> nat {
         // From https://users.ece.cmu.edu/~koopman/crc/crc64.html as one example.
