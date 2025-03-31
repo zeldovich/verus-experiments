@@ -127,7 +127,7 @@ verus! {
         }
 
         pub fn read<Lin>(&self, a: usize, len: usize,
-                         Tracked(lin): Tracked<Lin>) -> (result: (Vec<u8>, Tracked<Lin::ApplyResult>))
+                         Tracked(lin): Tracked<Lin>) -> (result: (Vec<u8>, Tracked<Lin::Completion>))
             where
                 Lin: ReadLinearizer<ReadOp>,
             requires
@@ -145,7 +145,7 @@ verus! {
         }
 
         pub fn write<Lin>(&mut self, a: usize, v: &[u8],
-                          Tracked(lin): Tracked<Lin>) -> (result: Tracked<Lin::ApplyResult>)
+                          Tracked(lin): Tracked<Lin>) -> (result: Tracked<Lin::Completion>)
             where
                 Lin: MutLinearizer<WriteOp>,
             requires
@@ -168,7 +168,7 @@ verus! {
             })
         }
 
-        pub fn flush<Lin>(&self, Tracked(p_lin): Tracked<Lin>) -> (result: Tracked<Lin::ApplyResult>)
+        pub fn flush<Lin>(&self, Tracked(p_lin): Tracked<Lin>) -> (result: Tracked<Lin::Completion>)
             where
                 Lin: ReadLinearizer<FlushOp>,
             requires

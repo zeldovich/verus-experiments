@@ -26,7 +26,7 @@ verus! {
 
     impl logatom::MutLinearizer<DiskWriteOp> for WriteFupd
     {
-        type ApplyResult = Frac<MemCrashView>;
+        type Completion = Frac<MemCrashView>;
 
         open spec fn pre(self, op: DiskWriteOp) -> bool {
             &&& self.frac.valid(op.id, 1)
@@ -73,7 +73,7 @@ verus! {
 
     impl logatom::MutLinearizer<DiskWriteOp> for WriteFupd1
     {
-        type ApplyResult = Frac<MemCrashView>;
+        type Completion = Frac<MemCrashView>;
 
         open spec fn pre(self, op: DiskWriteOp) -> bool {
             &&& self.frac.valid(op.id, 1)

@@ -28,7 +28,7 @@ verus! {
     }
 
     pub trait ReadLinearizer<Op: ReadOperation> : Sized {
-        type ApplyResult /* = () */;
+        type Completion /* = () */;
 
         open spec fn namespaces(self) -> Set<int> {
             Set::empty()
@@ -38,11 +38,11 @@ verus! {
             true
         }
 
-        open spec fn post(self, op: Op, r: Op::ExecResult, ar: Self::ApplyResult) -> bool {
+        open spec fn post(self, op: Op, r: Op::ExecResult, c: Self::Completion) -> bool {
             true
         }
 
-        proof fn apply(tracked self, op: Op, tracked r: &Op::Resource, e: &Op::ExecResult) -> (tracked out: Self::ApplyResult)
+        proof fn apply(tracked self, op: Op, tracked r: &Op::Resource, e: &Op::ExecResult) -> (tracked out: Self::Completion)
             requires
                 self.pre(op),
                 op.requires(*r, *e),
@@ -62,7 +62,7 @@ verus! {
     }
 
     pub trait MutLinearizer<Op: MutOperation> : Sized {
-        type ApplyResult /* = () */;
+        type Completion /* = () */;
 
         open spec fn namespaces(self) -> Set<int> {
             Set::empty()
@@ -72,11 +72,11 @@ verus! {
             true
         }
 
-        open spec fn post(self, op: Op, r: Op::ExecResult, ar: Self::ApplyResult) -> bool {
+        open spec fn post(self, op: Op, r: Op::ExecResult, c: Self::Completion) -> bool {
             true
         }
 
-        proof fn apply(tracked self, op: Op, hint: Op::ApplyHint, tracked r: &mut Op::Resource, e: &Op::ExecResult) -> (tracked out: Self::ApplyResult)
+        proof fn apply(tracked self, op: Op, hint: Op::ApplyHint, tracked r: &mut Op::Resource, e: &Op::ExecResult) -> (tracked out: Self::Completion)
             requires
                 self.pre(op),
                 op.requires(hint, *old(r), *e),

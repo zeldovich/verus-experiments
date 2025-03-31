@@ -12,7 +12,7 @@ verus! {
     }
 
     impl<'a> ReadLinearizer<ReadOp> for OwningReader<'a> {
-        type ApplyResult = ();
+        type Completion = ();
 
         open spec fn pre(self, op: ReadOp) -> bool {
             &&& self.latest_frac.valid(op.id)
@@ -50,7 +50,7 @@ verus! {
     }
 
     impl MutLinearizer<WriteOp> for OwningWriter {
-        type ApplyResult = (SeqFrac<u8>, SeqFrac<u8>);
+        type Completion = (SeqFrac<u8>, SeqFrac<u8>);
 
         open spec fn pre(self, op: WriteOp) -> bool {
             &&& self.latest_frac.valid(op.id)
@@ -62,7 +62,7 @@ verus! {
             &&& op.addr + op.data.len() <= self.persist_frac.off() + self.persist_frac@.len()
         }
 
-        open spec fn post(self, op: WriteOp, r: (), ar: Self::ApplyResult) -> bool {
+        open spec fn post(self, op: WriteOp, r: (), ar: Self::Completion) -> bool {
             &&& ar.0.valid(op.id)
             &&& ar.0.off() == self.latest_frac.off()
             &&& ar.0@ == update_seq(self.latest_frac@, op.addr - self.latest_frac.off(), op.data)
@@ -72,7 +72,7 @@ verus! {
             &&& can_result_from_write(ar.1@, self.persist_frac@, op.addr - self.persist_frac.off(), op.data)
         }
 
-        proof fn apply(tracked self, op: WriteOp, pstate: Seq<u8>, tracked r: &mut DiskResources, e: &()) -> (tracked out: Self::ApplyResult) {
+        proof fn apply(tracked self, op: WriteOp, pstate: Seq<u8>, tracked r: &mut DiskResources, e: &()) -> (tracked out: Self::Completion) {
             let tracked mut mself = self;
             mself.latest_frac.agree(&r.latest);
             mself.persist_frac.agree(&r.persist);
@@ -104,7 +104,7 @@ verus! {
     }
 
     impl<'a> ReadLinearizer<FlushOp> for OwningFlush<'a> {
-        type ApplyResult = ();
+        type Completion = ();
 
         open spec fn pre(self, op: FlushOp) -> bool {
             &&& self.latest_frac.valid(op.id)

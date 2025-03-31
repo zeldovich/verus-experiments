@@ -76,7 +76,7 @@ verus! {
 
     impl logatom::MutLinearizer<DiskWriteOp> for InvWritePerm
     {
-        type ApplyResult = InvPermResult;
+        type Completion = InvPermResult;
 
         open spec fn namespaces(self) -> Set<int> { set![self.inv.namespace()] }
 
@@ -152,7 +152,7 @@ verus! {
 
     impl logatom::ReadLinearizer<DiskBarrierOp> for InvBarrierPerm
     {
-        type ApplyResult = InvPermResult;
+        type Completion = InvPermResult;
 
         open spec fn namespaces(self) -> Set<int> { set![self.inv.namespace()] }
 
@@ -201,7 +201,7 @@ verus! {
 
     impl logatom::ReadLinearizer<DiskReadOp> for InvReadPerm
     {
-        type ApplyResult = InvPermResult;
+        type Completion = InvPermResult;
 
         open spec fn namespaces(self) -> Set<int> { set![self.inv.namespace()] }
 

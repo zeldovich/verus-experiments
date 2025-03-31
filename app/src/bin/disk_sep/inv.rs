@@ -74,7 +74,7 @@ verus! {
     }
 
     impl<'a> MutLinearizer<WriteOp> for InactiveWriter<'a> {
-        type ApplyResult = SeqFrac<u8>;
+        type Completion = SeqFrac<u8>;
 
         closed spec fn namespaces(self) -> Set<int> { set![self.inv.namespace()] }
 
@@ -92,13 +92,13 @@ verus! {
                 }
         }
 
-        open spec fn post(self, op: WriteOp, r: (), ar: Self::ApplyResult) -> bool {
+        open spec fn post(self, op: WriteOp, r: (), ar: Self::Completion) -> bool {
             &&& ar.valid(op.id)
             &&& ar.off() == self.latest_frac.off()
             &&& ar@ == update_seq(self.latest_frac@, op.addr - self.latest_frac.off(), op.data)
         }
 
-        proof fn apply(tracked self, op: WriteOp, pstate: Seq<u8>, tracked r: &mut DiskResources, e: &()) -> (tracked result: Self::ApplyResult) {
+        proof fn apply(tracked self, op: WriteOp, pstate: Seq<u8>, tracked r: &mut DiskResources, e: &()) -> (tracked result: Self::Completion) {
             let tracked mut mself = self;
             open_atomic_invariant_in_proof!(mself.credit => &mself.inv => inner => {
                 mself.ptr_state_frac.agree(&inner.ptr_state);
@@ -150,7 +150,7 @@ verus! {
     }
 
     impl<'a> ReadLinearizer<FlushOp> for PreparingFlush<'a> {
-        type ApplyResult = Frac<PtrState>;
+        type Completion = Frac<PtrState>;
 
         closed spec fn namespaces(self) -> Set<int> { set![self.inv.namespace()] }
 
@@ -219,7 +219,7 @@ verus! {
     }
 
     impl MutLinearizer<WriteOp> for CommittingWriter {
-        type ApplyResult = (SeqFrac<u8>, Frac<PtrState>);
+        type Completion = (SeqFrac<u8>, Frac<PtrState>);
 
         closed spec fn namespaces(self) -> Set<int> { set![self.inv.namespace()] }
 
@@ -235,7 +235,7 @@ verus! {
             &&& (op.data =~= seq![0u8] || op.data =~= seq![1u8])
         }
 
-        open spec fn post(self, op: WriteOp, r: (), ar: Self::ApplyResult) -> bool {
+        open spec fn post(self, op: WriteOp, r: (), ar: Self::Completion) -> bool {
             &&& ar.0.valid(op.id)
             &&& ar.0.off() == self.latest_frac.off()
             &&& ar.0@ == update_seq(self.latest_frac@, op.addr - self.latest_frac.off(), op.data)
@@ -244,7 +244,7 @@ verus! {
             &&& ar.1@ == PtrState::Either
         }
 
-        proof fn apply(tracked self, op: WriteOp, pstate: Seq<u8>, tracked r: &mut DiskResources, e: &()) -> (tracked result: Self::ApplyResult) {
+        proof fn apply(tracked self, op: WriteOp, pstate: Seq<u8>, tracked r: &mut DiskResources, e: &()) -> (tracked result: Self::Completion) {
             let tracked mut mself = self;
             open_atomic_invariant_in_proof!(mself.credit => &mself.inv => inner => {
                 mself.ptr_state_frac.agree(&inner.ptr_state);
@@ -290,7 +290,7 @@ verus! {
     }
 
     impl<'a> ReadLinearizer<FlushOp> for CommittingFlush<'a> {
-        type ApplyResult = Frac<PtrState>;
+        type Completion = Frac<PtrState>;
 
         closed spec fn namespaces(self) -> Set<int> { set![self.inv.namespace()] }
 

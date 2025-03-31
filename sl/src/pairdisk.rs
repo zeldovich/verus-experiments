@@ -180,7 +180,7 @@ verus! {
             }
         }
 
-        pub fn read<Perm>(&mut self, addr: u8, Tracked(perm): Tracked<Perm>) -> (result: (u8, Tracked<Perm::ApplyResult>))
+        pub fn read<Perm>(&mut self, addr: u8, Tracked(perm): Tracked<Perm>) -> (result: (u8, Tracked<Perm::Completion>))
             where
                 Perm: logatom::ReadLinearizer<DiskReadOp>
             requires
@@ -196,7 +196,7 @@ verus! {
             (v, Tracked(perm.apply(DiskReadOp{ id: old(self).id(), addr: addr }, self.frac.borrow_mut(), &v)))
         }
 
-        pub fn write<Perm>(&mut self, addr: u8, val: u8, Tracked(perm): Tracked<Perm>) -> (result: Tracked<Perm::ApplyResult>)
+        pub fn write<Perm>(&mut self, addr: u8, val: u8, Tracked(perm): Tracked<Perm>) -> (result: Tracked<Perm::Completion>)
             where
                 Perm: logatom::MutLinearizer<DiskWriteOp>
             requires
@@ -254,7 +254,7 @@ verus! {
             unimplemented!()
         }
 
-        pub fn barrier<Perm>(&mut self, Tracked(perm): Tracked<Perm>) -> (result: Tracked<Perm::ApplyResult>)
+        pub fn barrier<Perm>(&mut self, Tracked(perm): Tracked<Perm>) -> (result: Tracked<Perm::Completion>)
             where
                 Perm: logatom::ReadLinearizer<DiskBarrierOp>
             requires
