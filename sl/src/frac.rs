@@ -202,6 +202,35 @@ verus! {
             self.r = r.update(f);
         }
 
+        pub proof fn update_with(tracked &mut self, tracked other: &mut Self, v: T)
+            requires
+                old(self).inv(),
+                old(other).inv(),
+                old(self).id() == old(other).id(),
+                old(self).frac() + old(other).frac() == TOTAL,
+            ensures
+                self.inv(),
+                other.inv(),
+                self.id() == old(self).id(),
+                other.id() == old(other).id(),
+                self.frac() == old(self).frac(),
+                other.frac() == old(other).frac(),
+                self@ == v,
+                other@ == v,
+        {
+            let ghost other_frac = other.frac();
+            other.bounded();
+
+            let tracked mut xother = Self::dummy();
+            tracked_swap(other, &mut xother);
+            self.bounded();
+            self.combine(xother);
+            self.update(v);
+
+            let tracked mut xother = self.split(other_frac);
+            tracked_swap(other, &mut xother);
+        }
+
         pub proof fn bounded(tracked &self)
             requires
                 self.inv(),
@@ -212,7 +241,7 @@ verus! {
         }
     }
 
-    fn main()
+    fn example_use()
     {
         let tracked mut r = Frac::<u64, 3>::new(123);
         assert(r@ == 123);
@@ -232,9 +261,14 @@ verus! {
         let tracked mut a = Frac::<u32>::new(5);
         assert(a@ == 5);
         assert(a.frac() == 2);
-        let tracked b = a.split(1);
+        let tracked mut b = a.split(1);
         assert(a.frac() == 1);
         assert(b.frac() == 1);
+        proof {
+            a.update_with(&mut b, 123);
+        }
+        assert(a@ == 123);
+
         proof {
             a.combine(b);
             a.update(6);
