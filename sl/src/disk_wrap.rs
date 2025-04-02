@@ -27,24 +27,28 @@ verus! {
         pub data: Seq<u8>,
     }
 
+    pub struct WriteNewState {
+        pub persist_data: Seq<u8>,
+    }
+
     impl MutOperation for WriteOp {
         type Resource = DiskResources;
         type ExecResult = ();
-        type ApplyHint = Seq<u8>;
+        type NewState = WriteNewState;
 
-        open spec fn requires(self, pstate: Seq<u8>, r: Self::Resource, e: ()) -> bool {
-            &&& r.latest.valid(self.id)
-            &&& r.persist.valid(self.persist_id)
-            &&& can_result_from_write(pstate,
-                                      if self.data.len() > 0 { r.persist@.subrange(self.addr as int, self.addr+self.data.len()) } else { Seq::empty() },
+        open spec fn requires(self, pre: Self::Resource, new_state: Self::NewState, e: ()) -> bool {
+            &&& pre.latest.valid(self.id)
+            &&& pre.persist.valid(self.persist_id)
+            &&& can_result_from_write(new_state.persist_data,
+                                      if self.data.len() > 0 { pre.persist@.subrange(self.addr as int, self.addr+self.data.len()) } else { Seq::empty() },
                                       0, self.data)
         }
 
-        open spec fn ensures(self, pstate: Seq<u8>, pre: Self::Resource, post: Self::Resource) -> bool {
+        open spec fn ensures(self, pre: Self::Resource, post: Self::Resource, new_state: Self::NewState) -> bool {
             &&& post.latest.valid(self.id)
             &&& post.persist.valid(self.persist_id)
             &&& post.latest@ =~= update_seq(pre.latest@, self.addr as int, self.data)
-            &&& post.persist@ =~= update_seq(pre.persist@, self.addr as int, pstate)
+            &&& post.persist@ =~= update_seq(pre.persist@, self.addr as int, new_state.persist_data)
         }
 
         open spec fn peek_requires(self, r: Self::Resource) -> bool {
@@ -161,10 +165,14 @@ verus! {
                 lin.peek(WriteOp{ id: old(self).id(), persist_id: old(self).persist_id(), addr: a, data: v@ }, self.r.borrow());
             }
             self.d.write(a, v);
+            let ghost new_state = WriteNewState{
+                persist_data: if v.len() > 0 { self.d.persist().subrange(a as int, a+v.len()) } else { Seq::empty() },
+            };
             Tracked({
                 lin.apply(WriteOp{ id: old(self).id(), persist_id: old(self).persist_id(), addr: a, data: v@ },
-                          if v.len() > 0 { self.d.persist().subrange(a as int, a+v.len()) } else { Seq::empty() },
-                          self.r.borrow_mut(), &())
+                          self.r.borrow_mut(),
+                          new_state,
+                          &())
             })
         }
 

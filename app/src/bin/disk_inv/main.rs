@@ -105,7 +105,7 @@ verus! {
                   ( op.addr == 0 && r.app_frac@.crash == op.val ) )
         }
 
-        proof fn apply(tracked self, op: DiskWriteOp, write_crash: bool, tracked r: &mut Frac<MemCrashView>, er: &()) -> (tracked result: InvPermResult)
+        proof fn apply(tracked self, op: DiskWriteOp, tracked r: &mut Frac<MemCrashView>, write_crash: bool, er: &()) -> (tracked result: InvPermResult)
         {
             let tracked mut mself = self;
             let tracked mut ires;

@@ -98,17 +98,17 @@ verus! {
             &&& ar@ == update_seq(self.latest_frac@, op.addr - self.latest_frac.off(), op.data)
         }
 
-        proof fn apply(tracked self, op: WriteOp, pstate: Seq<u8>, tracked r: &mut DiskResources, e: &()) -> (tracked result: Self::Completion) {
+        proof fn apply(tracked self, op: WriteOp, tracked r: &mut DiskResources, new_state: WriteNewState, e: &()) -> (tracked result: Self::Completion) {
             let tracked mut mself = self;
             open_atomic_invariant_in_proof!(mself.credit => &mself.inv => inner => {
                 mself.ptr_state_frac.agree(&inner.ptr_state);
 
                 if op.addr == a_addr {
                     inner.a.agree(&r.persist);
-                    inner.a.update(&mut r.persist, pstate);
+                    inner.a.update(&mut r.persist, new_state.persist_data);
                 } else {
                     inner.b.agree(&r.persist);
-                    inner.b.update(&mut r.persist, pstate);
+                    inner.b.update(&mut r.persist, new_state.persist_data);
                 }
             });
 
@@ -244,12 +244,12 @@ verus! {
             &&& ar.1@ == PtrState::Either
         }
 
-        proof fn apply(tracked self, op: WriteOp, pstate: Seq<u8>, tracked r: &mut DiskResources, e: &()) -> (tracked result: Self::Completion) {
+        proof fn apply(tracked self, op: WriteOp, tracked r: &mut DiskResources, new_state: WriteNewState, e: &()) -> (tracked result: Self::Completion) {
             let tracked mut mself = self;
             open_atomic_invariant_in_proof!(mself.credit => &mself.inv => inner => {
                 mself.ptr_state_frac.agree(&inner.ptr_state);
                 inner.ptr.agree(&r.persist);
-                inner.ptr.update(&mut r.persist, pstate);
+                inner.ptr.update(&mut r.persist, new_state.persist_data);
             });
 
             mself.latest_frac.agree(&r.latest);

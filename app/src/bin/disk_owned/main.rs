@@ -52,7 +52,7 @@ verus! {
                   abs_inv(self.abs_post, r@.crash) )
         }
 
-        proof fn apply(tracked self, op: DiskWriteOp, write_crash: bool, tracked r: &mut Frac<MemCrashView>, er: &()) -> (tracked result: Frac<MemCrashView>)
+        proof fn apply(tracked self, op: DiskWriteOp, tracked r: &mut Frac<MemCrashView>, write_crash: bool, er: &()) -> (tracked result: Frac<MemCrashView>)
         {
             r.combine(self.frac);
             r.update(MemCrashView{
@@ -92,7 +92,7 @@ verus! {
             &&& abs_inv(self.abs, r@.crash)
         }
 
-        proof fn apply(tracked self, op: DiskWriteOp, write_crash: bool, tracked r: &mut Frac<MemCrashView>, er: &()) -> (tracked result: Frac<MemCrashView>)
+        proof fn apply(tracked self, op: DiskWriteOp, tracked r: &mut Frac<MemCrashView>, write_crash: bool, er: &()) -> (tracked result: Frac<MemCrashView>)
         {
             r.combine(self.frac);
             r.update(MemCrashView{

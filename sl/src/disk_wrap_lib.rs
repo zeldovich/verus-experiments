@@ -72,13 +72,13 @@ verus! {
             &&& can_result_from_write(ar.1@, self.persist_frac@, op.addr - self.persist_frac.off(), op.data)
         }
 
-        proof fn apply(tracked self, op: WriteOp, pstate: Seq<u8>, tracked r: &mut DiskResources, e: &()) -> (tracked out: Self::Completion) {
+        proof fn apply(tracked self, op: WriteOp, tracked r: &mut DiskResources, new_state: WriteNewState, e: &()) -> (tracked out: Self::Completion) {
             let tracked mut mself = self;
             mself.latest_frac.agree(&r.latest);
             mself.persist_frac.agree(&r.persist);
 
             mself.latest_frac.update_range(&mut r.latest, op.addr - self.latest_frac.off(), op.data);
-            mself.persist_frac.update_range(&mut r.persist, op.addr - self.persist_frac.off(), pstate);
+            mself.persist_frac.update_range(&mut r.persist, op.addr - self.persist_frac.off(), new_state.persist_data);
 
             (mself.latest_frac, mself.persist_frac)
         }

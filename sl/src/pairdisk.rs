@@ -41,18 +41,16 @@ verus! {
     impl logatom::MutOperation for DiskWriteOp {
         type Resource = Frac<MemCrashView>;
         type ExecResult = ();
-        type ApplyHint = bool;
+        type NewState = bool;
 
-        open spec fn requires(self, write_crash: bool, r: Self::Resource, e: ()) -> bool {
-            r.valid(self.id, 1)
+        open spec fn requires(self, pre: Self::Resource, new_state: Self::NewState, e: ()) -> bool {
+            &&& pre.valid(self.id, 1)
         }
 
-        open spec fn ensures(self, write_crash: bool, pre: Self::Resource, post: Self::Resource) -> bool {
+        open spec fn ensures(self, pre: Self::Resource, post: Self::Resource, new_state: Self::NewState) -> bool {
             &&& post.valid(self.id, 1)
-            &&& post@ == MemCrashView{
-                mem: view_write(pre@.mem, self.addr, self.val),
-                crash: if write_crash { view_write(pre@.crash, self.addr, self.val) } else { pre@.crash },
-            }
+            &&& post@.mem == view_write(pre@.mem, self.addr, self.val)
+            &&& post@.crash == if new_state { view_write(pre@.crash, self.addr, self.val) } else { pre@.crash }
         }
     }
 
@@ -238,7 +236,7 @@ verus! {
                 }
 
                 let op = DiskWriteOp{ id: old(self).id(), addr: addr, val: val };
-                perm.apply(op, write_crash, self.frac.borrow_mut(), &())
+                perm.apply(op, self.frac.borrow_mut(), write_crash, &())
             })
         }
 

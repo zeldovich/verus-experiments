@@ -16,10 +16,10 @@ verus! {
     pub trait MutOperation : Sized {
         type Resource /* = () */;   // tracked resource(s) passed to callback
         type ExecResult /* = () */; // executable result returned from operation
-        type ApplyHint /* = () */;  // when apply might otherwise be non-deterministic
+        type NewState /* = () */;   // type of new value for the resource
 
-        spec fn requires(self, hint: Self::ApplyHint, r: Self::Resource, e: Self::ExecResult) -> bool;
-        spec fn ensures(self, hint: Self::ApplyHint, pre: Self::Resource, post: Self::Resource) -> bool;
+        spec fn requires(self, pre: Self::Resource, new_state: Self::NewState, e: Self::ExecResult) -> bool;
+        spec fn ensures(self, pre: Self::Resource, post: Self::Resource, new_state: Self::NewState) -> bool;
 
         // Optionally support peeking, which provides initial validation
         // before the operation is linearized.
@@ -76,12 +76,12 @@ verus! {
             true
         }
 
-        proof fn apply(tracked self, op: Op, hint: Op::ApplyHint, tracked r: &mut Op::Resource, e: &Op::ExecResult) -> (tracked out: Self::Completion)
+        proof fn apply(tracked self, op: Op, tracked r: &mut Op::Resource, new_state: Op::NewState, e: &Op::ExecResult) -> (tracked out: Self::Completion)
             requires
                 self.pre(op),
-                op.requires(hint, *old(r), *e),
+                op.requires(*old(r), new_state, *e),
             ensures
-                op.ensures(hint, *old(r), *r),
+                op.ensures(*old(r), *r, new_state),
                 self.post(op, *e, out),
             opens_invariants
                 { self.namespaces() };
