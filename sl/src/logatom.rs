@@ -49,7 +49,7 @@ verus! {
             ensures
                 self.post(op, *e, out),
             opens_invariants
-                { self.namespaces() };
+                self.namespaces();
 
         proof fn peek(tracked &self, op: Op, tracked r: &Op::Resource)
             requires
@@ -58,7 +58,7 @@ verus! {
             ensures
                 op.peek_ensures(*r),
             opens_invariants
-                { self.namespaces() };
+                self.namespaces();
     }
 
     pub trait MutLinearizer<Op: MutOperation> : Sized {
@@ -84,7 +84,7 @@ verus! {
                 op.ensures(*old(r), *r, new_state),
                 self.post(op, *e, out),
             opens_invariants
-                { self.namespaces() };
+                self.namespaces();
 
         proof fn peek(tracked &self, op: Op, tracked r: &Op::Resource)
             requires
@@ -93,6 +93,6 @@ verus! {
             ensures
                 op.peek_ensures(*r),
             opens_invariants
-                { self.namespaces() };
+                self.namespaces();
     }
 }
