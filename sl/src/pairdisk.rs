@@ -119,7 +119,6 @@ verus! {
         {
             self.block0.len() > 0 &&
             self.block1.len() > 0 &&
-            self.frac@.inv() &&
             self.frac@@.crash == self.durable &&
             self.frac@@.mem == (self.block0[self.block0.len()-1], self.block1[self.block1.len()-1]) &&
             self.frac@.frac() == 1 &&
@@ -163,7 +162,6 @@ verus! {
         pub fn read_owned(&self, addr: u8, Tracked(f): Tracked<&Frac<MemCrashView>>) -> (result: u8)
             requires
                 self.inv(),
-                f.inv(),
                 f.id() == self.id(),
             returns
                 view_read(f@.mem, addr)
