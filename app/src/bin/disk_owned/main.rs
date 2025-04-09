@@ -1,7 +1,7 @@
 use builtin::*;
 use vstd::prelude::*;
 
-use sl::frac::Frac;
+use sl::frac::{GhostVar, GhostVarAuth};
 use sl::logatom;
 use sl::pairdisk::DiskView;
 use sl::pairdisk::MemCrashView;
@@ -19,17 +19,17 @@ verus! {
 
     pub struct WriteFupd
     {
-        pub tracked frac: Frac<MemCrashView>,
+        pub tracked frac: GhostVar<MemCrashView>,
         pub ghost abs_pre: AbsView,
         pub ghost abs_post: AbsView,
     }
 
     impl logatom::MutLinearizer<DiskWriteOp> for WriteFupd
     {
-        type Completion = Frac<MemCrashView>;
+        type Completion = GhostVar<MemCrashView>;
 
         open spec fn pre(self, op: DiskWriteOp) -> bool {
-            &&& self.frac.valid(op.id, 1)
+            &&& self.frac.id() == op.id
             &&& if op.addr == 0 {
                     self.abs_post == op.val &&
                     op.val <= self.frac@.mem.1 &&
@@ -42,8 +42,8 @@ verus! {
             &&& abs_inv(self.abs_pre, self.frac@.crash)
         }
 
-        open spec fn post(self, op: DiskWriteOp, er: (), r: Frac<MemCrashView>) -> bool {
-            &&& r.valid(op.id, 1)
+        open spec fn post(self, op: DiskWriteOp, er: (), r: GhostVar<MemCrashView>) -> bool {
+            &&& r.id() == op.id
             &&& r@.mem == view_write(self.frac@.mem, op.addr, op.val)
             &&& ( r@.crash == self.frac@.crash ||
                   r@.crash == view_write(self.frac@.crash, op.addr, op.val) )
@@ -52,39 +52,42 @@ verus! {
                   abs_inv(self.abs_post, r@.crash) )
         }
 
-        proof fn apply(tracked self, op: DiskWriteOp, tracked r: &mut Frac<MemCrashView>, write_crash: bool, er: &()) -> (tracked result: Frac<MemCrashView>)
+        proof fn apply(tracked self, op: DiskWriteOp, tracked r: &mut GhostVarAuth<MemCrashView>, write_crash: bool, er: &()) -> (tracked result: GhostVar<MemCrashView>)
         {
-            r.combine(self.frac);
-            r.update(MemCrashView{
+            let tracked mut f = self.frac;
+            r.update(&mut f, MemCrashView{
                     mem: view_write(r@.mem, op.addr, op.val),
                     crash: if write_crash { view_write(r@.crash, op.addr, op.val) } else { r@.crash },
                 });
-            r.split(1)
+            assert(f.id() == op.id);
+            assert(f@.mem == view_write(self.frac@.mem, op.addr, op.val));
+            assert(self.post(op, *er, f));
+            f
         }
 
-        proof fn peek(tracked &self, op: DiskWriteOp, tracked r: &Frac<MemCrashView>) {}
+        proof fn peek(tracked &self, op: DiskWriteOp, tracked r: &GhostVarAuth<MemCrashView>) {}
     }
 
     pub struct WriteFupd1
     {
-        pub tracked frac: Frac<MemCrashView>,
+        pub tracked frac: GhostVar<MemCrashView>,
         pub ghost abs: AbsView,
     }
 
     impl logatom::MutLinearizer<DiskWriteOp> for WriteFupd1
     {
-        type Completion = Frac<MemCrashView>;
+        type Completion = GhostVar<MemCrashView>;
 
         open spec fn pre(self, op: DiskWriteOp) -> bool {
-            &&& self.frac.valid(op.id, 1)
+            &&& self.frac.id() == op.id
             &&& op.addr == 1
             &&& op.val >= self.abs
             &&& abs_inv(self.abs, self.frac@.mem)
             &&& abs_inv(self.abs, self.frac@.crash)
         }
 
-        open spec fn post(self, op: DiskWriteOp, er: (), r: Frac<MemCrashView>) -> bool {
-            &&& r.valid(op.id, 1)
+        open spec fn post(self, op: DiskWriteOp, er: (), r: GhostVar<MemCrashView>) -> bool {
+            &&& r.id() == op.id
             &&& r@.mem == view_write(self.frac@.mem, op.addr, op.val)
             &&& ( r@.crash == self.frac@.crash ||
                   r@.crash == view_write(self.frac@.crash, 1, op.val) )
@@ -92,17 +95,17 @@ verus! {
             &&& abs_inv(self.abs, r@.crash)
         }
 
-        proof fn apply(tracked self, op: DiskWriteOp, tracked r: &mut Frac<MemCrashView>, write_crash: bool, er: &()) -> (tracked result: Frac<MemCrashView>)
+        proof fn apply(tracked self, op: DiskWriteOp, tracked r: &mut GhostVarAuth<MemCrashView>, write_crash: bool, er: &()) -> (tracked result: GhostVar<MemCrashView>)
         {
-            r.combine(self.frac);
-            r.update(MemCrashView{
+            let tracked mut f = self.frac;
+            r.update(&mut f, MemCrashView{
                     mem: view_write(r@.mem, op.addr, op.val),
                     crash: if write_crash { view_write(r@.crash, op.addr, op.val) } else { r@.crash },
                 });
-            r.split(1)
+            f
         }
 
-        proof fn peek(tracked &self, op: DiskWriteOp, tracked r: &Frac<MemCrashView>) {}
+        proof fn peek(tracked &self, op: DiskWriteOp, tracked r: &GhostVarAuth<MemCrashView>) {}
     }
 
     fn main()

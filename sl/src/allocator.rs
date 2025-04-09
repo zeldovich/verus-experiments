@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 
 use vstd::prelude::*;
+
+#[cfg(verus_keep_ghost)]
 use vstd::std_specs::hash::IterAdditionalSpecFns;
 
 verus! {

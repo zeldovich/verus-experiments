@@ -9,11 +9,11 @@ use std::sync::Arc;
 verus! {
     enum Inner<T, const TOTAL: u64> {
         Present {
-            tracked frac: Frac<T, TOTAL>,
+            tracked frac: FracGhost<T, TOTAL>,
             ptsto: PointsTo<T>,
         },
         Absent {
-            tracked frac: Frac<T, TOTAL>,
+            tracked frac: FracGhost<T, TOTAL>,
         },
     }
 
@@ -42,7 +42,7 @@ verus! {
     }
 
     impl<T, const TOTAL: u64> Holder<T, TOTAL> {
-        proof fn new(tracked ptsto: PointsTo<T>, ns: int) -> (tracked result: (Holder<T, TOTAL>, Frac<T, TOTAL>))
+        proof fn new(tracked ptsto: PointsTo<T>, ns: int) -> (tracked result: (Holder<T, TOTAL>, FracGhost<T, TOTAL>))
             requires
                 TOTAL > 1,
                 size_of::<T>() > 0,
@@ -52,7 +52,7 @@ verus! {
                 result.0.ptsto_addr() == ptsto.ptr() as usize,
                 result.1.valid(result.0.frac_id(), TOTAL-1),
         {
-            let tracked mut frac = Frac::<T, TOTAL>::new(ptsto.value());
+            let tracked mut frac = FracGhost::<T, TOTAL>::new(ptsto.value());
             let tracked frac_res = frac.split(TOTAL-1);
             let tracked inner = Inner::Present{ frac, ptsto };
             let pred = Pred{
@@ -83,7 +83,7 @@ verus! {
             self.inv.namespace()
         }
 
-        pub proof fn extract(tracked self, tracked mut f: Frac<T, TOTAL>, tracked credit: OpenInvariantCredit) -> (result: PointsTo<T>)
+        pub proof fn extract(tracked self, tracked mut f: FracGhost<T, TOTAL>, tracked credit: OpenInvariantCredit) -> (result: PointsTo<T>)
             requires
                 self.inv(),
                 f.valid(self.frac_id(), TOTAL-1),
@@ -110,7 +110,7 @@ verus! {
             result
         }
 
-        pub proof fn deposit(tracked self, tracked ptsto: PointsTo<T>, tracked credit: OpenInvariantCredit) -> (result: Frac<T, TOTAL>)
+        pub proof fn deposit(tracked self, tracked ptsto: PointsTo<T>, tracked credit: OpenInvariantCredit) -> (result: FracGhost<T, TOTAL>)
             requires
                 self.inv(),
                 ptsto.ptr() as usize == self.ptsto_addr(),

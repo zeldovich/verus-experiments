@@ -113,7 +113,9 @@ verus! {
                 can_result_from_write(self.persist(), old(self).persist(), a as int, v@),
         {
             self.store.splice(a..a+v.len(), v.iter().cloned());
-            self.persist = arbitrary();
+            proof {
+                self.persist = arbitrary();
+            }
         }
 
         #[verifier::external_body]

@@ -3,7 +3,7 @@ use vstd::prelude::*;
 use vstd::invariant::*;
 use std::sync::Arc;
 
-use sl::frac::Frac;
+use sl::frac::{GhostVar, GhostVarAuth};
 use sl::logatom;
 use sl::pairdisk::DiskView;
 use sl::pairdisk::MemCrashView;
@@ -29,13 +29,13 @@ verus! {
 
     pub struct DiskInvState {
         // Actual disk state.
-        disk: Frac<MemCrashView>,
+        disk: GhostVar<MemCrashView>,
 
         // Re-exporting disk state for applicaton to track intermediate writes.
-        disk2: Frac<MemCrashView>,
+        disk2: GhostVarAuth<MemCrashView>,
 
         // Abstract state (memory and crash).
-        abs: Frac<AbsPair>,
+        abs: GhostVarAuth<AbsPair>,
     }
 
     pub struct DiskInvParam {
@@ -49,27 +49,27 @@ verus! {
     impl InvariantPredicate<DiskInvParam, DiskInvState> for DiskInvPred
     {
         closed spec fn inv(k: DiskInvParam, v: DiskInvState) -> bool {
-            v.disk.valid(k.disk_id, 1) &&
-            v.disk2.valid(k.disk2_id, 1) &&
-            v.abs.valid(k.abs_id, 1) &&
-            v.disk@ == v.disk2@ &&
-            abs_inv(v.abs@.mem, v.disk@.mem) &&
-            abs_inv(v.abs@.crash, v.disk@.crash)
+            &&& v.disk.id() == k.disk_id
+            &&& v.disk2.id() == k.disk2_id
+            &&& v.abs.id() == k.abs_id
+            &&& v.disk@ == v.disk2@
+            &&& abs_inv(v.abs@.mem, v.disk@.mem)
+            &&& abs_inv(v.abs@.crash, v.disk@.crash)
         }
     }
 
     pub struct InvPermResult
     {
-        pub disk2_frac: Frac<MemCrashView>,
-        pub app_frac: Frac<AbsPair>,
+        pub disk2_frac: GhostVar<MemCrashView>,
+        pub app_frac: GhostVar<AbsPair>,
     }
 
     pub struct InvWritePerm
     {
         pub a: u8,
         pub v: u8,
-        pub tracked disk2_frac: Frac<MemCrashView>,
-        pub tracked app_frac: Frac<AbsPair>,
+        pub tracked disk2_frac: GhostVar<MemCrashView>,
+        pub tracked app_frac: GhostVar<AbsPair>,
         pub inv: Arc<AtomicInvariant<DiskInvParam, DiskInvState, DiskInvPred>>,
         pub tracked credit: OpenInvariantCredit,
     }
@@ -82,8 +82,8 @@ verus! {
 
         open spec fn pre(self, op: DiskWriteOp) -> bool {
             &&& op.id == self.inv.constant().disk_id
-            &&& self.disk2_frac.valid(self.inv.constant().disk2_id, 1)
-            &&& self.app_frac.valid(self.inv.constant().abs_id, 1)
+            &&& self.disk2_frac.id() == self.inv.constant().disk2_id
+            &&& self.app_frac.id() == self.inv.constant().abs_id
             &&& if op.addr == 0 {
                     op.val <= self.disk2_frac@.mem.1 &&
                     op.val <= self.disk2_frac@.crash.1
@@ -94,40 +94,34 @@ verus! {
         }
 
         open spec fn post(self, op: DiskWriteOp, er: (), r: InvPermResult) -> bool {
-            &&& r.disk2_frac.valid(self.inv.constant().disk2_id, 1)
+            &&& r.disk2_frac.id() == self.inv.constant().disk2_id
             &&& r.disk2_frac@.mem == view_write(self.disk2_frac@.mem, op.addr, op.val)
             &&& ( r.disk2_frac@.crash == self.disk2_frac@.crash ||
                   r.disk2_frac@.crash == view_write(self.disk2_frac@.crash, op.addr, op.val) )
 
-            &&& r.app_frac.valid(self.inv.constant().abs_id, 1)
+            &&& r.app_frac.id() == self.inv.constant().abs_id
             &&& r.app_frac@.mem == if op.addr == 0 { op.val } else { self.app_frac@.mem }
             &&& ( r.app_frac@.crash == self.app_frac@.crash ||
                   ( op.addr == 0 && r.app_frac@.crash == op.val ) )
         }
 
-        proof fn apply(tracked self, op: DiskWriteOp, tracked r: &mut Frac<MemCrashView>, write_crash: bool, er: &()) -> (tracked result: InvPermResult)
+        proof fn apply(tracked self, op: DiskWriteOp, tracked r: &mut GhostVarAuth<MemCrashView>, write_crash: bool, er: &()) -> (tracked result: InvPermResult)
         {
             let tracked mut mself = self;
             let tracked mut ires;
             open_atomic_invariant_in_proof!(mself.credit => &mself.inv => inner => {
-                r.combine(inner.disk);
-                r.update(MemCrashView{
+                r.update(&mut inner.disk, MemCrashView{
                         mem: view_write(r@.mem, op.addr, op.val),
                         crash: if write_crash { view_write(r@.crash, op.addr, op.val) } else { r@.crash },
                     });
-                inner.disk = r.split(1);
 
-                mself.disk2_frac.combine(inner.disk2);
-                mself.disk2_frac.update(inner.disk@);
-                inner.disk2 = mself.disk2_frac.split(1);
+                inner.disk2.update(&mut mself.disk2_frac, inner.disk@);
 
                 if op.addr == 0 {
-                    mself.app_frac.combine(inner.abs);
-                    mself.app_frac.update(AbsPair{
+                    inner.abs.update(&mut mself.app_frac, AbsPair{
                         mem: op.val,
                         crash: if write_crash { op.val } else { mself.app_frac@.crash },
                     });
-                    inner.abs = mself.app_frac.split(1)
                 };
 
                 ires = InvPermResult{
@@ -139,13 +133,13 @@ verus! {
             ires
         }
 
-        proof fn peek(tracked &self, op: DiskWriteOp, tracked r: &Frac<MemCrashView>) {}
+        proof fn peek(tracked &self, op: DiskWriteOp, tracked r: &GhostVarAuth<MemCrashView>) {}
     }
 
     pub struct InvBarrierPerm
     {
-        pub tracked disk2_frac: Frac<MemCrashView>,
-        pub tracked app_frac: Frac<AbsPair>,
+        pub tracked disk2_frac: GhostVar<MemCrashView>,
+        pub tracked app_frac: GhostVar<AbsPair>,
         pub inv: Arc<AtomicInvariant<DiskInvParam, DiskInvState, DiskInvPred>>,
         pub tracked credit: OpenInvariantCredit,
     }
@@ -158,28 +152,28 @@ verus! {
 
         open spec fn pre(self, op: DiskBarrierOp) -> bool {
             &&& self.inv.constant().disk_id == op.id
-            &&& self.disk2_frac.valid(self.inv.constant().disk2_id, 1)
-            &&& self.app_frac.valid(self.inv.constant().abs_id, 1)
+            &&& self.disk2_frac.id() == self.inv.constant().disk2_id
+            &&& self.app_frac.id() == self.inv.constant().abs_id
         }
 
         open spec fn post(self, op: DiskBarrierOp, er: (), r: InvPermResult) -> bool {
-            r.disk2_frac.valid(self.inv.constant().disk2_id, 1) &&
-            r.app_frac.valid(self.inv.constant().abs_id, 1) &&
+            &&& r.disk2_frac.id() == self.inv.constant().disk2_id
+            &&& r.app_frac.id() == self.inv.constant().abs_id
 
-            r.disk2_frac@ == self.disk2_frac@ &&
-            r.disk2_frac@.mem == r.disk2_frac@.crash &&
+            &&& r.disk2_frac@ == self.disk2_frac@
+            &&& r.disk2_frac@.mem == r.disk2_frac@.crash
 
-            r.app_frac@ == self.app_frac@ &&
-            r.app_frac@.mem == r.app_frac@.crash
+            &&& r.app_frac@ == self.app_frac@
+            &&& r.app_frac@.mem == r.app_frac@.crash
         }
 
-        proof fn apply(tracked self, op: DiskBarrierOp, tracked r: &Frac<MemCrashView>, er: &()) -> (tracked result: InvPermResult)
+        proof fn apply(tracked self, op: DiskBarrierOp, tracked r: &GhostVarAuth<MemCrashView>, er: &()) -> (tracked result: InvPermResult)
         {
             let tracked mut mself = self;
             open_atomic_invariant_in_proof!(mself.credit => &mself.inv => inner => {
                 r.agree(&inner.disk);
-                mself.disk2_frac.agree(&inner.disk2);
-                mself.app_frac.agree(&inner.abs);
+                inner.disk2.agree(&mself.disk2_frac);
+                inner.abs.agree(&mself.app_frac);
             });
 
             InvPermResult{
@@ -188,13 +182,13 @@ verus! {
             }
         }
 
-        proof fn peek(tracked &self, op: DiskBarrierOp, tracked r: &Frac<MemCrashView>) {}
+        proof fn peek(tracked &self, op: DiskBarrierOp, tracked r: &GhostVarAuth<MemCrashView>) {}
     }
 
     pub struct InvReadPerm
     {
-        pub tracked disk2_frac: Frac<MemCrashView>,
-        pub tracked app_frac: Frac<AbsPair>,
+        pub tracked disk2_frac: GhostVar<MemCrashView>,
+        pub tracked app_frac: GhostVar<AbsPair>,
         pub inv: Arc<AtomicInvariant<DiskInvParam, DiskInvState, DiskInvPred>>,
         pub tracked credit: OpenInvariantCredit,
     }
@@ -207,14 +201,14 @@ verus! {
 
         open spec fn pre(self, op: DiskReadOp) -> bool {
             &&& self.inv.constant().disk_id == op.id
-            &&& self.disk2_frac.valid(self.inv.constant().disk2_id, 1)
-            &&& self.app_frac.valid(self.inv.constant().abs_id, 1)
+            &&& self.disk2_frac.id() == self.inv.constant().disk2_id
+            &&& self.app_frac.id() == self.inv.constant().abs_id
             &&& ( op.addr == 0 || op.addr == 1)
         }
 
         open spec fn post(self, op: DiskReadOp, v: u8, r: InvPermResult) -> bool {
-            &&& r.disk2_frac.valid(self.inv.constant().disk2_id, 1)
-            &&& r.app_frac.valid(self.inv.constant().abs_id, 1)
+            &&& r.disk2_frac.id() == self.inv.constant().disk2_id
+            &&& r.app_frac.id() == self.inv.constant().abs_id
 
             &&& r.disk2_frac@ == self.disk2_frac@
             &&& r.app_frac@ == self.app_frac@
@@ -222,13 +216,13 @@ verus! {
             &&& v == view_read(r.disk2_frac@.mem, op.addr)
         }
 
-        proof fn apply(tracked self, op: DiskReadOp, tracked r: &Frac<MemCrashView>, v: &u8) -> (tracked result: InvPermResult)
+        proof fn apply(tracked self, op: DiskReadOp, tracked r: &GhostVarAuth<MemCrashView>, v: &u8) -> (tracked result: InvPermResult)
         {
             let tracked mut mself = self;
             open_atomic_invariant_in_proof!(mself.credit => &mself.inv => inner => {
                 r.agree(&inner.disk);
-                mself.disk2_frac.agree(&inner.disk2);
-                mself.app_frac.agree(&inner.abs);
+                inner.disk2.agree(&mself.disk2_frac);
+                inner.abs.agree(&mself.app_frac);
             });
 
             InvPermResult{
@@ -237,18 +231,15 @@ verus! {
             }
         }
 
-        proof fn peek(tracked &self, op: DiskReadOp, tracked r: &Frac<MemCrashView>) {}
+        proof fn peek(tracked &self, op: DiskReadOp, tracked r: &GhostVarAuth<MemCrashView>) {}
     }
 
     fn main()
     {
         let (mut d, Tracked(r)) = Disk::new();
 
-        let tracked mut app_r = Frac::<AbsPair>::new(AbsPair{ mem: 0, crash: 0 });
-        let tracked app_r1 = app_r.split(1);
-
-        let tracked mut disk_r = Frac::<MemCrashView>::new(r@);
-        let tracked disk_r1 = disk_r.split(1);
+        let tracked (app_r1, app_r) = GhostVarAuth::<AbsPair>::new(AbsPair{ mem: 0, crash: 0 });
+        let tracked (disk_r1, disk_r) = GhostVarAuth::<MemCrashView>::new(r@);
 
         let ghost inv_param = DiskInvParam{
             disk_id: r.id(),

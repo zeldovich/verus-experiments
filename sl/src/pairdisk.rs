@@ -2,7 +2,7 @@ use builtin::*;
 use vstd::prelude::*;
 use vstd::proph::*;
 
-use super::frac::Frac;
+use super::frac::{GhostVar, GhostVarAuth};
 use super::logatom;
 
 verus! {
@@ -39,16 +39,16 @@ verus! {
     }
 
     impl logatom::MutOperation for DiskWriteOp {
-        type Resource = Frac<MemCrashView>;
+        type Resource = GhostVarAuth<MemCrashView>;
         type ExecResult = ();
         type NewState = bool;
 
         open spec fn requires(self, pre: Self::Resource, new_state: Self::NewState, e: ()) -> bool {
-            &&& pre.valid(self.id, 1)
+            &&& pre.id() == self.id
         }
 
         open spec fn ensures(self, pre: Self::Resource, post: Self::Resource, new_state: Self::NewState) -> bool {
-            &&& post.valid(self.id, 1)
+            &&& post.id() == self.id
             &&& post@.mem == view_write(pre@.mem, self.addr, self.val)
             &&& post@.crash == if new_state { view_write(pre@.crash, self.addr, self.val) } else { pre@.crash }
         }
@@ -59,11 +59,11 @@ verus! {
     }
 
     impl logatom::ReadOperation for DiskBarrierOp {
-        type Resource = Frac<MemCrashView>;
+        type Resource = GhostVarAuth<MemCrashView>;
         type ExecResult = ();
 
         open spec fn requires(self, r: Self::Resource, e: Self::ExecResult) -> bool {
-            &&& r.valid(self.id, 1)
+            &&& r.id() == self.id
             &&& r@.mem == r@.crash
         }
     }
@@ -74,11 +74,11 @@ verus! {
     }
 
     impl logatom::ReadOperation for DiskReadOp {
-        type Resource = Frac<MemCrashView>;
+        type Resource = GhostVarAuth<MemCrashView>;
         type ExecResult = u8;
 
         open spec fn requires(self, r: Self::Resource, e: Self::ExecResult) -> bool {
-            &&& r.valid(self.id, 1)
+            &&& r.id() == self.id
             &&& e == view_read(r@.mem, self.addr)
         }
     }
@@ -88,7 +88,7 @@ verus! {
         block0: Vec<u8>,
         block1: Vec<u8>,
         ghost durable: DiskView,    // Prophecy-style crash state
-        frac: Tracked<Frac<MemCrashView>>,
+        frac: Tracked<GhostVarAuth<MemCrashView>>,
 
         // proph0/proph1 predict which value in prev0/prev1 will be durably
         // written to disk.  If the value is not equal to any of the pending
@@ -121,7 +121,6 @@ verus! {
             self.block1.len() > 0 &&
             self.frac@@.crash == self.durable &&
             self.frac@@.mem == (self.block0[self.block0.len()-1], self.block1[self.block1.len()-1]) &&
-            self.frac@.frac() == 1 &&
             self.durable.0 == proph_value(self.block0, self.proph0) &&
             self.durable.1 == proph_value(self.block1, self.proph1)
         }
@@ -131,35 +130,34 @@ verus! {
             self.frac@.id()
         }
 
-        pub fn new() -> (res: (Disk, Tracked<Frac::<MemCrashView>>))
+        pub fn new() -> (res: (Disk, Tracked<GhostVar::<MemCrashView>>))
             requires
                 true,
             ensures
                 res.0.inv(),
-                res.1@.valid(res.0.id(), 1),
+                res.1@.id() == res.0.id(),
                 res.1@@ == (MemCrashView{
                     mem: (0, 0),
                     crash: (0, 0),
                 }),
         {
-            let tracked mut r = Frac::<MemCrashView>::new(MemCrashView{
+            let tracked (ra, rv) = GhostVarAuth::<MemCrashView>::new(MemCrashView{
                 mem: (0, 0),
                 crash: (0, 0),
             });
-            let tracked r2 = r.split(1);
             let mut d = Disk{
                 block0: vec![0],
                 block1: vec![0],
                 durable: (0, 0),
-                frac: Tracked(r),
+                frac: Tracked(ra),
                 proph0: Prophecy::<u8>::new(),
                 proph1: Prophecy::<u8>::new(),
             };
-            (d, Tracked(r2))
+            (d, Tracked(rv))
         }
 
         // Leftover, should really be implemented in terms of the fupd-style read() below.
-        pub fn read_owned(&self, addr: u8, Tracked(f): Tracked<&Frac<MemCrashView>>) -> (result: u8)
+        pub fn read_owned(&self, addr: u8, Tracked(f): Tracked<&GhostVar<MemCrashView>>) -> (result: u8)
             requires
                 self.inv(),
                 f.id() == self.id(),
@@ -167,7 +165,7 @@ verus! {
                 view_read(f@.mem, addr)
         {
             proof {
-                f.agree(self.frac.borrow())
+                self.frac.borrow().agree(f)
             };
             if addr == 0 {
                 self.block0[self.block0.len()-1]
@@ -240,10 +238,10 @@ verus! {
 
         // Leftover, should really be implemented in terms of the fupd-style barrier() below
         #[verifier(external_body)]
-        pub fn barrier_owned(&self, Tracked(f): Tracked<&Frac::<MemCrashView>>)
+        pub fn barrier_owned(&self, Tracked(f): Tracked<&GhostVar::<MemCrashView>>)
             requires
                 self.inv(),
-                f.valid(self.id(), 1),
+                f.id() == self.id(),
             ensures
                 f@.crash == f@.mem,
         {

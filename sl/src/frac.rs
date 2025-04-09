@@ -71,11 +71,11 @@ verus! {
         }
     }
 
-    pub struct Frac<T, const TOTAL: u64 = 2> {
+    pub struct FracGhost<T, const TOTAL: u64 = 2> {
         r: Resource<FractionalCarrier<T, TOTAL>>,
     }
 
-    impl<T, const TOTAL: u64> Frac<T, TOTAL> {
+    impl<T, const TOTAL: u64> FracGhost<T, TOTAL> {
         #[verifier::type_invariant]
         pub closed spec fn inv(self) -> bool
         {
@@ -119,7 +119,7 @@ verus! {
         {
             let f = FractionalCarrier::<T, TOTAL>::new(v);
             let tracked r = Resource::alloc(f);
-            Frac { r }
+            Self { r }
         }
 
         pub proof fn agree(tracked self: &Self, tracked other: &Self)
@@ -236,9 +236,101 @@ verus! {
         }
     }
 
+    pub struct GhostVar<T> {
+        frac: FracGhost<T>,
+    }
+
+    impl<T> GhostVar<T> {
+        #[verifier::type_invariant]
+        pub closed spec fn inv(self) -> bool {
+            self.frac.frac() == 1
+        }
+
+        pub closed spec fn id(self) -> int {
+            self.frac.id()
+        }
+
+        pub closed spec fn view(self) -> T {
+            self.frac.view()
+        }
+    }
+
+    pub struct GhostVarAuth<T> {
+        frac: FracGhost<T>,
+    }
+
+    impl<T> GhostVarAuth<T> {
+        #[verifier::type_invariant]
+        pub closed spec fn inv(self) -> bool {
+            self.frac.frac() == 1
+        }
+
+        pub closed spec fn id(self) -> int {
+            self.frac.id()
+        }
+
+        pub closed spec fn view(self) -> T {
+            self.frac.view()
+        }
+
+        pub proof fn new(v: T) -> (tracked result: (GhostVarAuth<T>, GhostVar<T>))
+            ensures
+                result.0.id() == result.1.id(),
+                result.0@ == v,
+                result.1@ == v,
+        {
+            let tracked mut f = FracGhost::<T>::new(v);
+            let tracked v = GhostVar::<T>{
+                frac: f.split(1),
+            };
+            let tracked a = GhostVarAuth::<T>{
+                frac: f,
+            };
+            (a, v)
+        }
+
+        pub proof fn agree(tracked &self, tracked v: &GhostVar<T>)
+            requires
+                self.id() == v.id()
+            ensures
+                self@ == v@
+        {
+            self.frac.agree(&v.frac)
+        }
+
+        pub proof fn update(tracked &mut self, tracked v: &mut GhostVar<T>, new_val: T)
+            requires
+                old(self).id() == old(v).id()
+            ensures
+                self.id() == old(self).id(),
+                v.id() == old(v).id(),
+                old(self)@ == old(v)@,
+                self@ == new_val,
+                v@ == new_val,
+        {
+            self.agree(v);
+            let tracked (mut ms, mut mv) = Self::new(new_val);
+            tracked_swap(self, &mut ms);
+            tracked_swap(v, &mut mv);
+            use_type_invariant(&ms);
+            use_type_invariant(&mv);
+            let tracked mut msfrac = ms.frac;
+            msfrac.combine(mv.frac);
+            msfrac.update(new_val);
+            let tracked mut nv = GhostVar::<T>{
+                frac: msfrac.split(1),
+            };
+            let tracked mut ns = Self{
+                frac: msfrac,
+            };
+            tracked_swap(self, &mut ns);
+            tracked_swap(v, &mut nv);
+        }
+    }
+
     fn example_use()
     {
-        let tracked mut r = Frac::<u64, 3>::new(123);
+        let tracked mut r = FracGhost::<u64, 3>::new(123);
         assert(r@ == 123);
         assert(r.frac() == 3);
         let tracked r2 = r.split(2);
@@ -253,7 +345,7 @@ verus! {
         assert(r@ == 456);
         assert(r.frac() == 3);
 
-        let tracked mut a = Frac::<u32>::new(5);
+        let tracked mut a = FracGhost::<u32>::new(5);
         assert(a@ == 5);
         assert(a.frac() == 2);
         let tracked mut b = a.split(1);

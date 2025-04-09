@@ -33,13 +33,13 @@ verus! {
         let tracked mut f3 = f1.split(2);
         let tracked mut pf3 = pf1.split(2);
 
-        let tracked mut ps = Frac::new(PtrState::A);
+        let tracked (ps_auth, ps) = GhostVarAuth::new(PtrState::A);
 
         let tracked crashstate = DiskCrashState{
             ptr: pf,
             a: pf1,
             b: pf3,
-            ptr_state: ps.split(1),
+            ptr_state: ps_auth,
         };
 
         let ghost iparam = DiskInvParam{
@@ -117,18 +117,18 @@ verus! {
     }
 
     // Untrusted (verified) recovery helper: re-allocate ephemeral ghost state.
-    fn disk_recovery_verified_helper(Tracked(i): Tracked<AtomicInvariant::<DiskInvParam, DiskCrashState, DiskInvParam>>) -> (result: (Tracked<AtomicInvariant::<DiskInvParam, DiskCrashState, DiskInvParam>>, Tracked<Frac<PtrState>>))
+    fn disk_recovery_verified_helper(Tracked(i): Tracked<AtomicInvariant::<DiskInvParam, DiskCrashState, DiskInvParam>>) -> (result: (Tracked<AtomicInvariant::<DiskInvParam, DiskCrashState, DiskInvParam>>, Tracked<GhostVar<PtrState>>))
         ensures
-            result.1@.valid(result.0@.constant().ptr_state_id, 1),
+            result.1@.id() == result.0@.constant().ptr_state_id,
             result.0@.constant().persist_id == i.constant().persist_id,
     {
         // Destroy the invariant; we will re-allocate a new one with a different ptr_state_id.
         let ghost mut iparam = i.constant();
         let tracked inner = i.into_inner();
 
-        let tracked mut ps = Frac::new(inner.ptr_state@);
+        let tracked (ps_auth, ps) = GhostVarAuth::new(inner.ptr_state@);
         proof {
-            inner.ptr_state = ps.split(1);
+            inner.ptr_state = ps_auth;
             iparam.ptr_state_id = ps.id();
         }
 

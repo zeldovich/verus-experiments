@@ -25,7 +25,7 @@ verus! {
         pub ptr: SeqFrac<u8>,
         pub a: SeqFrac<u8>,
         pub b: SeqFrac<u8>,
-        pub ptr_state: Frac<PtrState>,
+        pub ptr_state: GhostVarAuth<PtrState>,
     }
 
     pub struct DiskInvParam {
@@ -39,7 +39,7 @@ verus! {
             &&& inner.ptr.off() == ptr_addr
             &&& inner.ptr@.len() == 1
 
-            &&& inner.ptr_state.valid(k.ptr_state_id, 1)
+            &&& inner.ptr_state.id() == k.ptr_state_id
 
             &&& inner.a.valid(k.persist_id)
             &&& inner.a.off() == a_addr
@@ -68,7 +68,7 @@ verus! {
     // Writing to a block that's currently unused.
     pub struct InactiveWriter<'a> {
         pub latest_frac: SeqFrac<u8>,
-        pub ptr_state_frac: &'a Frac<PtrState>,
+        pub ptr_state_frac: &'a GhostVar<PtrState>,
         pub inv: Arc<AtomicInvariant<DiskInvParam, DiskCrashState, DiskInvParam>>,
         pub credit: OpenInvariantCredit,
     }
@@ -83,7 +83,7 @@ verus! {
             &&& self.latest_frac.off() <= op.addr
             &&& op.addr + op.data.len() <= self.latest_frac.off() + self.latest_frac@.len()
 
-            &&& self.ptr_state_frac.valid(self.inv.constant().ptr_state_id, 1)
+            &&& self.ptr_state_frac.id() == self.inv.constant().ptr_state_id
             &&& op.persist_id == self.inv.constant().persist_id
             &&& op.data.len() == 2
             &&& {
@@ -101,7 +101,7 @@ verus! {
         proof fn apply(tracked self, op: WriteOp, tracked r: &mut DiskResources, new_state: WriteNewState, e: &()) -> (tracked result: Self::Completion) {
             let tracked mut mself = self;
             open_atomic_invariant_in_proof!(mself.credit => &mself.inv => inner => {
-                mself.ptr_state_frac.agree(&inner.ptr_state);
+                inner.ptr_state.agree(&mself.ptr_state_frac);
 
                 if op.addr == a_addr {
                     inner.a.agree(&r.persist);
@@ -124,7 +124,7 @@ verus! {
     }
 
     impl<'a> InactiveWriter<'a> {
-        pub fn new(Tracked(lf): Tracked<SeqFrac<u8>>, Tracked(ps): Tracked<&'a Frac<PtrState>>,
+        pub fn new(Tracked(lf): Tracked<SeqFrac<u8>>, Tracked(ps): Tracked<&'a GhostVar<PtrState>>,
                Tracked(i): Tracked<&Arc<AtomicInvariant<DiskInvParam, DiskCrashState, DiskInvParam>>>) -> (result: Tracked<Self>)
             ensures
                 result@.latest_frac == lf,
@@ -143,19 +143,19 @@ verus! {
 
     // Flushing to ensure that the inactive range is prepared to be made active.
     pub struct PreparingFlush<'a> {
-        pub ptr_state_frac: Frac<PtrState>,
+        pub ptr_state_frac: GhostVar<PtrState>,
         pub preparing_frac: &'a SeqFrac<u8>,
         pub inv: Arc<AtomicInvariant<DiskInvParam, DiskCrashState, DiskInvParam>>,
         pub credit: OpenInvariantCredit,
     }
 
     impl<'a> ReadLinearizer<FlushOp> for PreparingFlush<'a> {
-        type Completion = Frac<PtrState>;
+        type Completion = GhostVar<PtrState>;
 
         closed spec fn namespaces(self) -> Set<int> { set![self.inv.namespace()] }
 
         open spec fn pre(self, op: FlushOp) -> bool {
-            &&& self.ptr_state_frac.valid(self.inv.constant().ptr_state_id, 1)
+            &&& self.ptr_state_frac.id() == self.inv.constant().ptr_state_id
             &&& self.preparing_frac.valid(op.id)
             &&& self.preparing_frac@[0] + self.preparing_frac@[1] == total
             &&& op.persist_id == self.inv.constant().persist_id
@@ -172,20 +172,18 @@ verus! {
                 }
         }
 
-        open spec fn post(self, op: FlushOp, r: (), ar: Frac<PtrState>) -> bool {
-            &&& ar.valid(self.inv.constant().ptr_state_id, 1)
+        open spec fn post(self, op: FlushOp, r: (), ar: GhostVar<PtrState>) -> bool {
+            &&& ar.id() == self.inv.constant().ptr_state_id
             &&& ar@ == PtrState::Either
         }
 
-        proof fn apply(tracked self, op: FlushOp, tracked r: &DiskResources, e: &()) -> (tracked result: Frac<PtrState>) {
+        proof fn apply(tracked self, op: FlushOp, tracked r: &DiskResources, e: &()) -> (tracked result: GhostVar<PtrState>) {
             let tracked mut mself = self;
             open_atomic_invariant_in_proof!(mself.credit => &mself.inv => inner => {
-                mself.ptr_state_frac.combine(inner.ptr_state);
+                inner.ptr_state.update(&mut mself.ptr_state_frac, PtrState::Either);
                 mself.preparing_frac.agree(&r.latest);
                 inner.a.agree(&r.persist);
                 inner.b.agree(&r.persist);
-                mself.ptr_state_frac.update(PtrState::Either);
-                inner.ptr_state = mself.ptr_state_frac.split(1);
             });
             mself.ptr_state_frac
         }
@@ -194,7 +192,7 @@ verus! {
     }
 
     impl<'a> PreparingFlush<'a> {
-        pub fn new(Tracked(ps): Tracked<Frac<PtrState>>, Tracked(pf): Tracked<&'a SeqFrac<u8>>, Tracked(i): Tracked<&Arc<AtomicInvariant<DiskInvParam, DiskCrashState, DiskInvParam>>>) -> (result: Tracked<Self>)
+        pub fn new(Tracked(ps): Tracked<GhostVar<PtrState>>, Tracked(pf): Tracked<&'a SeqFrac<u8>>, Tracked(i): Tracked<&Arc<AtomicInvariant<DiskInvParam, DiskCrashState, DiskInvParam>>>) -> (result: Tracked<Self>)
             ensures
                 result@.ptr_state_frac == ps,
                 result@.preparing_frac == pf,
@@ -213,13 +211,13 @@ verus! {
     // Flipping the pointer.
     pub struct CommittingWriter {
         pub latest_frac: SeqFrac<u8>,
-        pub ptr_state_frac: Frac<PtrState>,
+        pub ptr_state_frac: GhostVar<PtrState>,
         pub inv: Arc<AtomicInvariant<DiskInvParam, DiskCrashState, DiskInvParam>>,
         pub credit: OpenInvariantCredit,
     }
 
     impl MutLinearizer<WriteOp> for CommittingWriter {
-        type Completion = (SeqFrac<u8>, Frac<PtrState>);
+        type Completion = (SeqFrac<u8>, GhostVar<PtrState>);
 
         closed spec fn namespaces(self) -> Set<int> { set![self.inv.namespace()] }
 
@@ -229,7 +227,7 @@ verus! {
             &&& op.addr + op.data.len() <= self.latest_frac.off() + self.latest_frac@.len()
 
             &&& op.persist_id == self.inv.constant().persist_id
-            &&& self.ptr_state_frac.valid(self.inv.constant().ptr_state_id, 1)
+            &&& self.ptr_state_frac.id() == self.inv.constant().ptr_state_id
             &&& self.ptr_state_frac@ == PtrState::Either
             &&& op.addr == ptr_addr
             &&& (op.data =~= seq![0u8] || op.data =~= seq![1u8])
@@ -240,14 +238,14 @@ verus! {
             &&& ar.0.off() == self.latest_frac.off()
             &&& ar.0@ == update_seq(self.latest_frac@, op.addr - self.latest_frac.off(), op.data)
 
-            &&& ar.1.valid(self.inv.constant().ptr_state_id, 1)
+            &&& ar.1.id() == self.inv.constant().ptr_state_id
             &&& ar.1@ == PtrState::Either
         }
 
         proof fn apply(tracked self, op: WriteOp, tracked r: &mut DiskResources, new_state: WriteNewState, e: &()) -> (tracked result: Self::Completion) {
             let tracked mut mself = self;
             open_atomic_invariant_in_proof!(mself.credit => &mself.inv => inner => {
-                mself.ptr_state_frac.agree(&inner.ptr_state);
+                inner.ptr_state.agree(&mself.ptr_state_frac);
                 inner.ptr.agree(&r.persist);
                 inner.ptr.update(&mut r.persist, new_state.persist_data);
             });
@@ -264,7 +262,7 @@ verus! {
     }
 
     impl CommittingWriter {
-        pub fn new(Tracked(lf): Tracked<SeqFrac<u8>>, Tracked(ps): Tracked<Frac<PtrState>>,
+        pub fn new(Tracked(lf): Tracked<SeqFrac<u8>>, Tracked(ps): Tracked<GhostVar<PtrState>>,
                Tracked(i): Tracked<&Arc<AtomicInvariant<DiskInvParam, DiskCrashState, DiskInvParam>>>) -> (result: Tracked<Self>)
             ensures
                 result@.latest_frac == lf,
@@ -283,46 +281,44 @@ verus! {
 
     // Flushing after a pointer update.
     pub struct CommittingFlush<'a> {
-        pub ptr_state_frac: Frac<PtrState>,
+        pub ptr_state_frac: GhostVar<PtrState>,
         pub ptr_latest: &'a SeqFrac<u8>,
         pub inv: Arc<AtomicInvariant<DiskInvParam, DiskCrashState, DiskInvParam>>,
         pub credit: OpenInvariantCredit,
     }
 
     impl<'a> ReadLinearizer<FlushOp> for CommittingFlush<'a> {
-        type Completion = Frac<PtrState>;
+        type Completion = GhostVar<PtrState>;
 
         closed spec fn namespaces(self) -> Set<int> { set![self.inv.namespace()] }
 
         open spec fn pre(self, op: FlushOp) -> bool {
-            &&& self.ptr_state_frac.valid(self.inv.constant().ptr_state_id, 1)
+            &&& self.ptr_state_frac.id() == self.inv.constant().ptr_state_id
             &&& self.ptr_latest.valid(op.id)
             &&& self.inv.constant().persist_id == op.persist_id
             &&& self.ptr_latest.off() == ptr_addr
             &&& self.ptr_latest@.len() == 1
         }
 
-        open spec fn post(self, op: FlushOp, r: (), ar: Frac<PtrState>) -> bool {
-            &&& ar.valid(self.inv.constant().ptr_state_id, 1)
+        open spec fn post(self, op: FlushOp, r: (), ar: GhostVar<PtrState>) -> bool {
+            &&& ar.id() == self.inv.constant().ptr_state_id
             &&& {
                 ||| self.ptr_latest@[0] == 0 && ar@ == PtrState::A
                 ||| self.ptr_latest@[0] == 1 && ar@ == PtrState::B
                 }
         }
 
-        proof fn apply(tracked self, op: FlushOp, tracked r: &DiskResources, e: &()) -> (tracked result: Frac<PtrState>) {
+        proof fn apply(tracked self, op: FlushOp, tracked r: &DiskResources, e: &()) -> (tracked result: GhostVar<PtrState>) {
             let tracked mut mself = self;
             mself.ptr_latest.agree(&r.latest);
             open_atomic_invariant_in_proof!(mself.credit => &mself.inv => inner => {
                 inner.ptr.agree(&r.persist);
 
-                mself.ptr_state_frac.combine(inner.ptr_state);
                 if self.ptr_latest@[0] == 0 {
-                    mself.ptr_state_frac.update(PtrState::A);
+                    inner.ptr_state.update(&mut mself.ptr_state_frac, PtrState::A);
                 } else {
-                    mself.ptr_state_frac.update(PtrState::B);
+                    inner.ptr_state.update(&mut mself.ptr_state_frac, PtrState::B);
                 }
-                inner.ptr_state = mself.ptr_state_frac.split(1);
             });
             mself.ptr_state_frac
         }
@@ -331,7 +327,7 @@ verus! {
     }
 
     impl<'a> CommittingFlush<'a> {
-        pub fn new(Tracked(ps): Tracked<Frac<PtrState>>, Tracked(pl): Tracked<&'a SeqFrac<u8>>, Tracked(i): Tracked<&Arc<AtomicInvariant<DiskInvParam, DiskCrashState, DiskInvParam>>>) -> (result: Tracked<Self>)
+        pub fn new(Tracked(ps): Tracked<GhostVar<PtrState>>, Tracked(pl): Tracked<&'a SeqFrac<u8>>, Tracked(i): Tracked<&Arc<AtomicInvariant<DiskInvParam, DiskCrashState, DiskInvParam>>>) -> (result: Tracked<Self>)
             ensures
                 result@.ptr_state_frac == ps,
                 result@.ptr_latest == pl,
