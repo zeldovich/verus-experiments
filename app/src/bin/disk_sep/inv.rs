@@ -1,9 +1,10 @@
+use vstd::logatom::*;
+use vstd::tokens::frac::*;
+
 use std::sync::Arc;
 
 use sl::disk_wrap::*;
-use sl::logatom::*;
 use sl::seq_view::*;
-use sl::frac::*;
 use sl::seq_helper::*;
 
 use vstd::prelude::*;

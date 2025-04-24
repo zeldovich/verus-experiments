@@ -1,6 +1,7 @@
+use vstd::logatom::*;
+
 use super::disk_wrap::*;
 use super::vecdisk::*;
-use super::logatom::*;
 use super::seq_view::*;
 use super::seq_helper::*;
 

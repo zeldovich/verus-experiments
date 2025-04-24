@@ -1,9 +1,8 @@
 use builtin::*;
 use vstd::prelude::*;
 use vstd::proph::*;
-
-use super::frac::{GhostVar, GhostVarAuth};
-use super::logatom;
+use vstd::tokens::frac::{GhostVar, GhostVarAuth};
+use vstd::logatom;
 
 verus! {
     pub type DiskView = (u8, u8);

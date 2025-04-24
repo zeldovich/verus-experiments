@@ -1,10 +1,11 @@
 use builtin::*;
 use vstd::prelude::*;
 use vstd::invariant::*;
+use vstd::logatom;
+use vstd::tokens::frac::{GhostVar, GhostVarAuth};
+
 use std::sync::Arc;
 
-use sl::frac::{GhostVar, GhostVarAuth};
-use sl::logatom;
 use sl::pairdisk::DiskView;
 use sl::pairdisk::MemCrashView;
 use sl::pairdisk::view_read;

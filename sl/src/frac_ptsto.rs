@@ -1,8 +1,7 @@
 use vstd::prelude::*;
 use vstd::raw_ptr::*;
 use vstd::invariant::*;
-
-use super::frac::*;
+use vstd::tokens::frac::*;
 
 use std::sync::Arc;
 

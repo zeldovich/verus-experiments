@@ -1,8 +1,9 @@
 use vstd::prelude::*;
+use vstd::logatom::*;
+
 use super::vecdisk::*;
 use super::seq_view::*;
 use super::map_view::*;
-use super::logatom::*;
 use super::seq_helper::*;
 
 verus! {

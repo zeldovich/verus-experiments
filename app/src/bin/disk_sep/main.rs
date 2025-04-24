@@ -1,11 +1,12 @@
 mod inv;
 
+use vstd::tokens::frac::*;
+
 use std::sync::Arc;
 
 use sl::vecdisk::*;
 use sl::disk_wrap::*;
 use sl::seq_view::*;
-use sl::frac::*;
 use sl::disk_wrap_lib::*;
 
 use inv::*;

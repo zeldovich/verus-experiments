@@ -1,8 +1,8 @@
 use builtin::*;
 use vstd::prelude::*;
+use vstd::logatom;
+use vstd::tokens::frac::{GhostVar, GhostVarAuth};
 
-use sl::frac::{GhostVar, GhostVarAuth};
-use sl::logatom;
 use sl::pairdisk::DiskView;
 use sl::pairdisk::MemCrashView;
 use sl::pairdisk::view_write;
