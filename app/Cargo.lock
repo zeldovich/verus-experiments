@@ -21,12 +21,12 @@ checksum = "ace50bade8e6234aa140d9a2f552bbee1db4d353f69b8217bc503490fc1a9f26"
 [[package]]
 name = "builtin"
 version = "0.1.0"
-source = "git+https://github.com/verus-lang/verus#3df23937ff0c259a231f1ec07b27bd504f44ea47"
+source = "git+https://github.com/verus-lang/verus#fe07347f61c7b024db8bf19d40bb2e1b452c3ffe"
 
 [[package]]
 name = "builtin_macros"
 version = "0.1.0"
-source = "git+https://github.com/verus-lang/verus#3df23937ff0c259a231f1ec07b27bd504f44ea47"
+source = "git+https://github.com/verus-lang/verus#fe07347f61c7b024db8bf19d40bb2e1b452c3ffe"
 dependencies = [
  "prettyplease_verus",
  "proc-macro2",
@@ -55,7 +55,7 @@ dependencies = [
 [[package]]
 name = "prettyplease_verus"
 version = "0.2.29"
-source = "git+https://github.com/verus-lang/verus#3df23937ff0c259a231f1ec07b27bd504f44ea47"
+source = "git+https://github.com/verus-lang/verus#fe07347f61c7b024db8bf19d40bb2e1b452c3ffe"
 dependencies = [
  "proc-macro2",
  "syn_verus",
@@ -92,7 +92,7 @@ dependencies = [
 [[package]]
 name = "state_machines_macros"
 version = "0.1.0"
-source = "git+https://github.com/verus-lang/verus#3df23937ff0c259a231f1ec07b27bd504f44ea47"
+source = "git+https://github.com/verus-lang/verus#fe07347f61c7b024db8bf19d40bb2e1b452c3ffe"
 dependencies = [
  "indexmap",
  "proc-macro2",
@@ -102,9 +102,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "2.0.100"
+version = "2.0.101"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b09a44accad81e1ba1cd74a32461ba89dee89095ba17b32f5d03683b1b1fc2a0"
+checksum = "8ce2b7fc941b3a24138a0a7cf8e858bfc6a992e7978a068a5c760deb0ed43caf"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -114,7 +114,7 @@ dependencies = [
 [[package]]
 name = "syn_verus"
 version = "2.0.96"
-source = "git+https://github.com/verus-lang/verus#3df23937ff0c259a231f1ec07b27bd504f44ea47"
+source = "git+https://github.com/verus-lang/verus#fe07347f61c7b024db8bf19d40bb2e1b452c3ffe"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -147,7 +147,7 @@ checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 [[package]]
 name = "vstd"
 version = "0.1.0"
-source = "git+https://github.com/verus-lang/verus#3df23937ff0c259a231f1ec07b27bd504f44ea47"
+source = "git+https://github.com/verus-lang/verus#fe07347f61c7b024db8bf19d40bb2e1b452c3ffe"
 dependencies = [
  "builtin",
  "builtin_macros",
