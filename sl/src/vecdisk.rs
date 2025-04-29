@@ -174,8 +174,6 @@ verus! {
                     self@ == old(self)@,
                     v@.len() > 0 ==> a + v@.len() <= old(self)@.len(),
                     self.writeset() =~= old(self).writeset().union_prefer_right(seq_to_map(v@.subrange(0, i as int), a)),
-                decreases
-                    v.len() - i
             {
                 proof {
                     // Prove that self@.len() is at most usize, which means no overflows.
