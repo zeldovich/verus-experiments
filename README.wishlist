@@ -4,8 +4,6 @@ Verus feature wishlist:
   to close invariants that were left open, perhaps by tracking the thread's
   set of open invariants as an explicit value.
 
-- proof fn closures.
-
 - Support --expand-errors for trait implementations.  Workaround: assert
   the expected invocation of trait implementation, which causes Verus to
   see the specialized implementation.
