@@ -24,8 +24,8 @@ verus! {
 
     impl RwLockPredicate<LockedState> for LockPred {
         closed spec fn inv(self, v: LockedState) -> bool {
-            &&& v.r@.read.id() == self.read_id
-            &&& v.r@.durable.id() == self.durable_id
+            &&& v.r@.read.valid(self.read_id)
+            &&& v.r@.durable.valid(self.durable_id)
             &&& v.data@ == v.r@.read@
             &&& v.data@ == v.r@.durable@
         }
@@ -38,8 +38,10 @@ verus! {
     impl SimpleMem {
         pub exec fn new(sz: usize) -> (result: (SimpleMem, Tracked<SeqFrac<u8>>, Tracked<SeqFrac<u8>>))
             ensures
-                result.0.read_id() == result.1@.id(),
-                result.0.durable_id() == result.2@.id(),
+                result.1@.valid(result.0.read_id()),
+                result.2@.valid(result.0.durable_id()),
+                result.1@.off() == 0,
+                result.2@.off() == 0,
                 result.1@@.len() == sz,
                 result.2@@ == result.1@@,
         {
@@ -138,8 +140,8 @@ verus! {
                     addr + bytes@.len() <= state.data@.len(),
                     state.data@.len() <= usize::MAX,
                     state.data@ == update_seq(state.r@.read@, addr as int, bytes@.subrange(0, i as int)),
-                    state.r@.read.id() == op.read_id,
-                    state.r@.durable.id() == op.durable_id,
+                    state.r@.read.valid(op.read_id),
+                    state.r@.durable.valid(op.durable_id),
                     state.r@.read@ == state.r@.durable@,
             {
                 state.data[addr+i] = bytes[i];
@@ -148,9 +150,8 @@ verus! {
 
             let tracked complete;
             proof {
-                let ghost durable_new = update_seq(state.r@.durable@, addr as int, bytes@);
-                assert(state.data@ == durable_new);
-                complete = lin.apply(op, state.r.borrow_mut(), durable_new, &());
+                complete = lin.apply(op, state.r.borrow_mut(), bytes@, &());
+                assert(state.data@ == state.r@.read@);
             }
 
             handle.release_write(state);

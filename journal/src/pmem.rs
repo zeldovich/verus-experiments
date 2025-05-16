@@ -20,12 +20,12 @@ verus! {
         type ExecResult = Vec<u8>;
 
         open spec fn requires(self, r: Self::Resource, e: Self::ExecResult) -> bool {
-            &&& self.read_id == r.id()
+            &&& r.valid(self.read_id)
             &&& e@ == r@.subrange(self.addr as int, self.addr as int + self.num_bytes as int)
         }
 
         open spec fn peek_requires(self, r: Self::Resource) -> bool {
-            &&& self.read_id == r.id()
+            &&& r.valid(self.read_id)
         }
 
         open spec fn peek_ensures(self, r: Self::Resource) -> bool {
@@ -55,21 +55,21 @@ verus! {
         type NewState = Seq<u8>;
 
         open spec fn requires(self, r: Self::Resource, new_state: Self::NewState, e: Self::ExecResult) -> bool {
-            &&& self.read_id == r.read.id()
-            &&& self.durable_id == r.durable.id()
-            &&& can_result_from_write(new_state, r.durable@, self.addr as int, self.data)
+            &&& r.read.valid(self.read_id)
+            &&& r.durable.valid(self.durable_id)
+            &&& can_result_from_write(new_state, r.durable@.subrange(self.addr as int, self.addr as int + self.data.len()), 0, self.data)
         }
 
         open spec fn ensures(self, r: Self::Resource, new_r: Self::Resource, new_state: Self::NewState) -> bool {
-            &&& self.read_id == new_r.read.id()
-            &&& self.durable_id == new_r.durable.id()
+            &&& new_r.read.valid(self.read_id)
+            &&& new_r.durable.valid(self.durable_id)
             &&& new_r.read@ == update_seq(r.read@, self.addr as int, self.data)
-            &&& new_r.durable@ == new_state
+            &&& new_r.durable@ == update_seq(r.durable@, self.addr as int, new_state)
         }
 
         open spec fn peek_requires(self, r: Self::Resource) -> bool {
-            &&& self.read_id == r.read.id()
-            &&& self.durable_id == r.durable.id()
+            &&& r.read.valid(self.read_id)
+            &&& r.durable.valid(self.durable_id)
         }
 
         open spec fn peek_ensures(self, r: Self::Resource) -> bool {
@@ -87,8 +87,8 @@ verus! {
         type ExecResult = ();
 
         open spec fn requires(self, r: Self::Resource, e: Self::ExecResult) -> bool {
-            &&& self.read_id == r.read.id()
-            &&& self.durable_id == r.durable.id()
+            &&& r.read.valid(self.read_id)
+            &&& r.durable.valid(self.durable_id)
             &&& r.read@ == r.durable@
         }
     }
