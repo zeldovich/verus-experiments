@@ -71,6 +71,10 @@ verus! {
     impl MutLinearizer<Write> for InstallationWrite {
         type Completion = SeqFrac<u8>;
 
+        closed spec fn namespaces(self) -> Set<int> {
+            set![self.inv.namespace()]
+        }
+
         closed spec fn pre(self, op: Write) -> bool {
             &&& self.read.valid(op.read_id)
             &&& self.inv.constant().durable_id == op.durable_id
@@ -87,8 +91,17 @@ verus! {
         }
 
         proof fn apply(tracked self, op: Write, tracked r: &mut <Write as MutOperation>::Resource, new_state: <Write as MutOperation>::NewState, e: &<Write as MutOperation>::ExecResult) -> tracked Self::Completion {
-            admit();
-            self.read
+            let tracked mut mself = self;
+            mself.read.agree(&r.read);
+            mself.read.update(&mut r.read, op.data);
+
+            open_atomic_invariant_in_proof!(mself.credit => &mself.inv => inner => {
+                r.durable.update(&mut inner.durable, r.durable@.update_range(op.addr as int, new_state));
+                assert(CrashInvPred::inv(mself.inv.constant(), inner));
+            });
+
+            assert(op.ensures(*old(r), *r, new_state));
+            mself.read
         }
 
         proof fn peek(tracked &self, op: Write, tracked r: &<Write as MutOperation>::Resource) {
