@@ -8,7 +8,6 @@ use vstd::invariant::*;
 use vstd::logatom::*;
 
 use sl::seq_view::*;
-use sl::seq_helper::*;
 use sl::seq_prefix::*;
 
 use super::pmem::*;
@@ -39,7 +38,7 @@ verus! {
     }
 
     spec fn apply_write(state: Seq<u8>, write: GWrite) -> Seq<u8> {
-        update_seq(state, write.addr as int, write.data)
+        state.update_range(write.addr as int, write.data)
     }
 
     spec fn apply_writes(state: Seq<u8>, writes: Seq<GWrite>) -> Seq<u8> {

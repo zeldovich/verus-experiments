@@ -1,7 +1,6 @@
 use vstd::prelude::*;
 use vstd::logatom::*;
 use sl::seq_view::*;
-use sl::seq_helper::*;
 
 verus! {
     pub struct PMResource {
@@ -63,8 +62,8 @@ verus! {
         open spec fn ensures(self, r: Self::Resource, new_r: Self::Resource, new_state: Self::NewState) -> bool {
             &&& new_r.read.valid(self.read_id)
             &&& new_r.durable.valid(self.durable_id)
-            &&& new_r.read@ == update_seq(r.read@, self.addr as int, self.data)
-            &&& new_r.durable@ == update_seq(r.durable@, self.addr as int, new_state)
+            &&& new_r.read@ == r.read@.update_range(self.addr as int, self.data)
+            &&& new_r.durable@ == r.durable@.update_range(self.addr as int, new_state)
         }
 
         open spec fn peek_requires(self, r: Self::Resource) -> bool {

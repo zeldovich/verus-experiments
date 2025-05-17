@@ -2,7 +2,6 @@ use vstd::prelude::*;
 use vstd::logatom::*;
 
 use sl::seq_view::*;
-use sl::seq_helper::*;
 
 use super::pmem::*;
 
@@ -34,7 +33,7 @@ verus! {
             &&& r.read.off() == self.read.off()
             &&& r.durable.off() == self.durable.off()
 
-            &&& r.read@ == update_seq(self.read@, op.addr as int - self.read.off(), op.data)
+            &&& r.read@ == self.read@.update_range(op.addr as int - self.read.off(), op.data)
             &&& can_result_from_write(r.durable@, self.durable@, op.addr as int - self.durable.off(), op.data)
         }
 
@@ -47,8 +46,8 @@ verus! {
             mself.read.update_range(&mut r.read, op.addr as int - mself.read.off(), op.data);
             mself.durable.update_range(&mut r.durable, op.addr as int - mself.durable.off(), new_state);
 
-            assert(r.read@ == update_seq(old(r).read@, op.addr as int, op.data));
-            assert(r.durable@ == update_seq(old(r).durable@, op.addr as int, new_state));
+            assert(r.read@ == old(r).read@.update_range(op.addr as int, op.data));
+            assert(r.durable@ == old(r).durable@.update_range(op.addr as int, new_state));
 
             mself
         }
