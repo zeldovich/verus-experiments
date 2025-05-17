@@ -4,10 +4,6 @@ pub mod seq_helper;
 pub mod pairdisk;
 pub mod frac_ptsto;
 
-// Hamming-based CRC specs and proofs.
-pub mod hamming;
-pub mod crc;
-
 // Per-address separation logic for a disk.
 pub mod map_view;
 pub mod seq_view;
