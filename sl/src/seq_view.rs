@@ -172,7 +172,7 @@ verus! {
                 self.off() == old(self).off(),
                 auth.inv(),
                 auth.id() == old(auth).id(),
-                self@ =~= update_seq(old(self)@, off, v),
+                self@ =~= old(self)@.update_range(off, v),
                 auth@ =~= Seq::new(old(auth)@.len(), |i: int| if self.off() + off <= i < self.off() + off + v.len() { v[i - self.off() - off] } else { old(auth)@[i] }),
         {
             let tracked mut mid = self.split(off);

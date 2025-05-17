@@ -16,10 +16,6 @@ verus! {
         open spec fn to_int(i: Self) -> int { i as int }
     }
 
-    pub open spec fn update_seq<V>(s: Seq<V>, off: int, v: Seq<V>) -> Seq<V> {
-        Seq::new(s.len(), |i: int| if off <= i < off + v.len() { v[i - off] } else { s[i] })
-    }
-
     pub open spec fn update_seq_map<V, I: IntegerT>(s: Seq<V>, m: Map<I, V>) -> Seq<V>
         recommends
             forall |i| m.contains_key(i) ==> 0 <= I::to_int(i) < s.len()

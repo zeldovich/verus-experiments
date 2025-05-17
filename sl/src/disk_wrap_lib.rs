@@ -3,7 +3,6 @@ use vstd::logatom::*;
 use super::disk_wrap::*;
 use super::vecdisk::*;
 use super::seq_view::*;
-use super::seq_helper::*;
 
 use vstd::prelude::*;
 
@@ -66,7 +65,7 @@ verus! {
         open spec fn post(self, op: WriteOp, r: (), ar: Self::Completion) -> bool {
             &&& ar.0.valid(op.id)
             &&& ar.0.off() == self.latest_frac.off()
-            &&& ar.0@ == update_seq(self.latest_frac@, op.addr - self.latest_frac.off(), op.data)
+            &&& ar.0@ == self.latest_frac@.update_range(op.addr - self.latest_frac.off(), op.data)
 
             &&& ar.1.valid(op.persist_id)
             &&& ar.1.off() == self.persist_frac.off()
