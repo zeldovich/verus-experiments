@@ -46,6 +46,33 @@ verus! {
         writes.fold_left(state, |s, w: GWrite| apply_write(s, w))
     }
 
+    spec fn seq_equal_except_range<A>(s0: Seq<A>, s1: Seq<A>, off: int, len: int) -> bool
+        recommends
+            0 <= off,
+            0 <= len,
+            off + len <= s0.len(),
+            s0.len() == s1.len(),
+    {
+        &&& s0.len() == s1.len()
+        &&& forall |i| 0 <= i < s0.len() ==> {
+            ||| off <= i < off + len
+            ||| s0[i] == s1[i]
+        }
+    }
+
+    proof fn apply_writes_range_equal(state0: Seq<u8>, state1: Seq<u8>, writes: Seq<GWrite>, addr: int, len: int)
+        requires
+            seq_equal_except_range(state0, state1, addr, len)
+        ensures
+            seq_equal_except_range(apply_writes(state0, writes), apply_writes(state1, writes), addr, len)
+        decreases
+            writes.len()
+    {
+        if writes.len() > 0 {
+            apply_writes_range_equal(state0, state1, writes.subrange(0, writes.len()-1), addr, len);
+        }
+    }
+
     impl InvariantPredicate<CrashInvPred, CrashInvState> for CrashInvPred
     {
         closed spec fn inv(k: CrashInvPred, inner: CrashInvState) -> bool {
@@ -62,13 +89,39 @@ verus! {
         pub read_frac: Tracked<SeqFrac<u8>>,
     }
 
-    struct InstallationWrite {
+    struct InstallationWrite<'a> {
         credit: OpenInvariantCredit,
         inv: Arc<AtomicInvariant<CrashInvPred, CrashInvState, CrashInvPred>>,
         read: SeqFrac<u8>,
+        prefix: &'a SeqPrefix<GWrite>,
+        prefixpos: usize,
     }
 
-    impl MutLinearizer<Write> for InstallationWrite {
+    proof fn installation_write_idempotent(durable: Seq<u8>, pending: Seq<GWrite>, addr: int, data: Seq<u8>, pos: int)
+        requires
+            pending[pos].addr == addr,
+            pending[pos].data.len() == data.len(),
+            0 <= pos < pending.len(),
+        ensures
+            apply_writes(durable, pending) == apply_writes(durable.update_range(addr, data), pending)
+    {
+        let durableU = durable.update_range(addr, data);
+        let pending0 = pending.subrange(0, pos);
+        let dpos  = apply_writes(durable,  pending0);
+        let dposU = apply_writes(durableU, pending0);
+        apply_writes_range_equal(durable, durableU, pending0, addr, data.len() as int);
+
+        let w = pending[pos];
+        assert(apply_write(dpos, w) == apply_write(dposU, w));
+
+        let pending1 = pending.subrange(pos, pending.len() as int);
+
+        reveal_with_fuel(Seq::fold_left, 2);
+        assert(apply_writes(dpos,  pending1.subrange(0, 1)) == apply_write(dpos,  w));
+        assert(apply_writes(dposU, pending1.subrange(0, 1)) == apply_write(dposU, w));
+    }
+
+    impl<'a> MutLinearizer<Write> for InstallationWrite<'a> {
         type Completion = SeqFrac<u8>;
 
         closed spec fn namespaces(self) -> Set<int> {
@@ -82,6 +135,11 @@ verus! {
             &&& op.data.len() > 0
             &&& self.read.off() == op.addr
             &&& self.read@.len() == op.data.len()
+
+            &&& self.prefix.valid(self.inv.constant().pending_id)
+            &&& self.prefix@[self.prefixpos as int].addr == op.addr
+            &&& self.prefix@[self.prefixpos as int].data == op.data
+            &&& self.prefixpos < self.prefix@.len()
         }
 
         closed spec fn post(self, op: Write, e: <Write as MutOperation>::ExecResult, r: Self::Completion) -> bool {
@@ -96,8 +154,9 @@ verus! {
             mself.read.update(&mut r.read, op.data);
 
             open_atomic_invariant_in_proof!(mself.credit => &mself.inv => inner => {
+                inner.pending.agree(mself.prefix);
+                installation_write_idempotent(r.durable@, inner.pending@, op.addr as int, new_state, mself.prefixpos as int);
                 r.durable.update(&mut inner.durable, r.durable@.update_range(op.addr as int, new_state));
-                assert(CrashInvPred::inv(mself.inv.constant(), inner));
             });
 
             assert(op.ensures(*old(r), *r, new_state));
@@ -273,6 +332,8 @@ verus! {
                         &&& writes@[j].read_frac@@.len() == writes@[j].bytes@.len()
                     },
                     self.pmem.durable_id() == self.inv.constant().durable_id,
+                    prefix.valid(self.inv.constant().pending_id),
+                    nwrites <= prefix@.len(),
             {
                 let w = old_writes.pop_front().unwrap();
                 let credit = create_open_invariant_credit();
@@ -280,6 +341,8 @@ verus! {
                     credit: credit.get(),
                     inv: self.inv.clone(),
                     read: w.read_frac.get(),
+                    prefix: &prefix,
+                    prefixpos: i,
                 };
                 let r = self.pmem.write::<InstallationWrite>(w.addr, w.bytes, Tracked(iw));
                 proof {
