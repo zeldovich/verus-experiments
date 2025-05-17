@@ -96,41 +96,48 @@ verus! {
         }
     }
 
-    struct InstallationFlush<'a, 'b> {
+    struct InstallationFlush<'a> {
         credit: OpenInvariantCredit,
         inv: Arc<AtomicInvariant<CrashInvPred, CrashInvState, CrashInvPred>>,
         prefix: SeqPrefix<GWrite>,
-        writes: &'a VecDeque<JWrite<'b>>,
+        readfracs: &'a Seq<SeqFrac<u8>>,
     }
 
     proof fn installed_durable_after_flush(
         tracked durable: &GhostVar<Seq<u8>>,
         tracked read: &SeqAuth<u8>,
         tracked pending: &SeqPrefixAuth<GWrite>,
-        tracked writes: &VecDeque<JWrite>,
+        tracked readfracs: &Seq<SeqFrac<u8>>,
         n: int
     )
         requires
-            0 <= n <= writes@.len(),
-            writes@.len() <= pending@.len(),
+            0 <= n <= readfracs.len(),
+            readfracs.len() <= pending@.len(),
             durable@ == read@,
+            read.inv(),
+            forall |i| 0 <= i < readfracs.len() ==> {
+                &&& (#[trigger] readfracs[i]).valid(read.id())
+                &&& readfracs[i].off() == pending@[i].addr
+                &&& readfracs[i]@ == pending@[i].data
+            },
         ensures
             durable@ == apply_writes(durable@, pending@.subrange(0, n)),
         decreases
             n
     {
         if n > 0 {
-            installed_durable_after_flush(durable, read, pending, writes, n-1);
+            installed_durable_after_flush(durable, read, pending, readfracs, n-1);
 
             // Set up for lemma_fold_left_split().
             assert(pending@.subrange(0, n-1) == pending@.subrange(0, n).subrange(0, n-1));
             assert(pending@.subrange(n-1, n) == pending@.subrange(0, n).subrange(n-1, n));
 
+            readfracs.tracked_borrow(n-1).agree(read);
             assert(durable@ == apply_write(durable@, pending@[n-1]));
         }
     }
 
-    impl<'a, 'b> ReadLinearizer<Flush> for InstallationFlush<'a, 'b> {
+    impl<'a> ReadLinearizer<Flush> for InstallationFlush<'a> {
         type Completion = SeqPrefix<GWrite>;
 
         closed spec fn namespaces(self) -> Set<int> {
@@ -139,20 +146,18 @@ verus! {
 
         closed spec fn pre(self, op: Flush) -> bool {
             &&& self.prefix.valid(self.inv.constant().pending_id)
-            &&& self.writes@.len() <= self.prefix@.len()
+            &&& self.readfracs.len() <= self.prefix@.len()
             &&& self.inv.constant().durable_id == op.durable_id
-            &&& forall |i| 0 <= i < self.writes@.len() ==> {
-                &&& (#[trigger] self.writes@[i]).addr == self.prefix@[i].addr
-                &&& self.writes@[i].bytes@ == self.prefix@[i].data
-                &&& self.writes@[i].read_frac@.valid(op.read_id)
-                &&& self.writes@[i].read_frac@.off() == self.writes@[i].addr
-                &&& self.writes@[i].read_frac@@.len() == self.writes@[i].bytes@.len()
+            &&& forall |i| 0 <= i < self.readfracs.len() ==> {
+                &&& (#[trigger] self.readfracs[i]).valid(op.read_id)
+                &&& self.readfracs[i].off() == self.prefix@[i].addr
+                &&& self.readfracs[i]@ == self.prefix@[i].data
             }
         }
 
         closed spec fn post(self, op: Flush, e: <Write as MutOperation>::ExecResult, r: Self::Completion) -> bool {
             &&& r.valid(self.inv.constant().pending_id)
-            &&& r@ == self.prefix@.subrange(self.writes@.len() as int, self.prefix@.len() as int)
+            &&& r@ == self.prefix@.subrange(self.readfracs.len() as int, self.prefix@.len() as int)
         }
 
         proof fn apply(tracked self, op: Flush, tracked r: &<Flush as ReadOperation>::Resource, e: &<Flush as ReadOperation>::ExecResult) -> tracked Self::Completion {
@@ -161,9 +166,9 @@ verus! {
                 inner.pending.agree(&mself.prefix);
                 r.durable.agree(&inner.durable);
 
-                installed_durable_after_flush(&inner.durable, &r.read, &inner.pending, mself.writes, mself.writes@.len() as int);
+                installed_durable_after_flush(&inner.durable, &r.read, &inner.pending, mself.readfracs, mself.readfracs.len() as int);
 
-                inner.pending.truncate(&mut mself.prefix, mself.writes@.len() as int);
+                inner.pending.truncate(&mut mself.prefix, mself.readfracs.len() as int);
             });
 
             mself.prefix
@@ -209,7 +214,7 @@ verus! {
             self.inv.namespace()
         }
 
-        exec fn install<'a>(&self, mut writes: VecDeque<JWrite<'a>>, Tracked(prefix): Tracked<SeqPrefix<GWrite>>) -> (result: (VecDeque<JWrite<'a>>, Tracked<SeqPrefix<GWrite>>))
+        exec fn install<'a>(&self, mut writes: VecDeque<JWrite<'a>>, Tracked(prefix): Tracked<SeqPrefix<GWrite>>) -> (result: (Tracked<Seq<SeqFrac<u8>>>, Tracked<SeqPrefix<GWrite>>))
             requires
                 self.inv(),
                 writes@.len() <= prefix@.len(),
@@ -227,28 +232,24 @@ verus! {
                 result.1@.valid(self.pending_id()),
                 result.1@@ == prefix@.subrange(writes@.len() as int, prefix@.len() as int),
                 forall |i| 0 <= i < result.0@.len() ==> {
-                    &&& (#[trigger] result.0@[i]).addr == (#[trigger] writes@[i]).addr
-                    &&& result.0@[i].bytes == writes@[i].bytes
-                    &&& result.0@[i].read_frac@.valid(self.read_id())
-                    &&& result.0@[i].read_frac@.off() == writes@[i].read_frac@.off()
-                    &&& result.0@[i].read_frac@@ == writes@[i].bytes@
+                    &&& (#[trigger] result.0@[i]).valid(self.read_id())
+                    &&& result.0@[i].off() == writes@[i].read_frac@.off()
+                    &&& result.0@[i]@ == writes@[i].bytes@
                 },
         {
             broadcast use vstd::std_specs::vecdeque::group_vec_dequeue_axioms;
             let nwrites = writes.len();
             let mut old_writes = writes;
-            let mut new_writes = VecDeque::<JWrite>::new();
+            let tracked mut new_read_fracs = Seq::<SeqFrac<u8>>::tracked_empty();
             for i in 0..nwrites
                 invariant
                     writes@.len() == nwrites,
                     old_writes@ =~= writes@.subrange(i as int, writes@.len() as int),
-                    i == new_writes@.len(),
+                    i == new_read_fracs.len(),
                     forall |j| 0 <= j < i ==> {
-                        &&& (#[trigger] new_writes@[j]).addr == writes@[j].addr
-                        &&& new_writes@[j].bytes == writes@[j].bytes
-                        &&& new_writes@[j].read_frac@.valid(self.read_id())
-                        &&& new_writes@[j].read_frac@.off() == writes@[j].read_frac@.off()
-                        &&& new_writes@[j].read_frac@@ == writes@[j].bytes@
+                        &&& (#[trigger] new_read_fracs[j]).valid(self.read_id())
+                        &&& new_read_fracs[j].off() == writes@[j].read_frac@.off()
+                        &&& new_read_fracs[j]@ == writes@[j].bytes@
                     },
                     forall |j| 0 <= j < writes@.len() ==> {
                         &&& (#[trigger] writes@[j]).addr == prefix@[j].addr
@@ -268,11 +269,9 @@ verus! {
                     read: w.read_frac.get(),
                 };
                 let r = self.pmem.write::<InstallationWrite>(w.addr, w.bytes, Tracked(iw));
-                new_writes.push_back(JWrite{
-                    addr: w.addr,
-                    bytes: w.bytes,
-                    read_frac: r,
-                });
+                proof {
+                    new_read_fracs.tracked_push(r.get());
+                }
             }
 
             let credit = create_open_invariant_credit();
@@ -280,12 +279,12 @@ verus! {
                 credit: credit.get(),
                 inv: self.inv.clone(),
                 prefix: prefix,
-                writes: &new_writes,
+                readfracs: &new_read_fracs,
             };
 
             let prefix = self.pmem.flush::<InstallationFlush>(Tracked(ifl));
 
-            (new_writes, prefix)
+            (Tracked(new_read_fracs), prefix)
         }
     }
 
