@@ -38,8 +38,12 @@ verus! {
         pending_id: int,
     }
 
+    spec fn apply_write(state: Seq<u8>, write: GWrite) -> Seq<u8> {
+        update_seq(state, write.addr as int, write.data)
+    }
+
     spec fn apply_writes(state: Seq<u8>, writes: Seq<GWrite>) -> Seq<u8> {
-        writes.fold_right(|w: GWrite, s| update_seq(s, w.addr as int, w.data), state)
+        writes.fold_left(state, |s, w: GWrite| apply_write(s, w))
     }
 
     impl InvariantPredicate<CrashInvPred, CrashInvState> for CrashInvPred
@@ -72,14 +76,14 @@ verus! {
             &&& self.inv.constant().durable_id == op.durable_id
 
             &&& op.data.len() > 0
-            &&& self.read.off() <= op.addr
-            &&& op.addr + op.data.len() <= self.read.off() + self.read@.len()
+            &&& self.read.off() == op.addr
+            &&& self.read@.len() == op.data.len()
         }
 
         closed spec fn post(self, op: Write, e: <Write as MutOperation>::ExecResult, r: Self::Completion) -> bool {
             &&& r.valid(op.read_id)
             &&& r.off() == self.read.off()
-            &&& r@ == update_seq(self.read@, op.addr as int - self.read.off(), op.data)
+            &&& r@ == op.data
         }
 
         proof fn apply(tracked self, op: Write, tracked r: &mut <Write as MutOperation>::Resource, new_state: <Write as MutOperation>::NewState, e: &<Write as MutOperation>::ExecResult) -> tracked Self::Completion {
@@ -89,6 +93,84 @@ verus! {
 
         proof fn peek(tracked &self, op: Write, tracked r: &<Write as MutOperation>::Resource) {
             self.read.agree(&r.read);
+        }
+    }
+
+    struct InstallationFlush<'a, 'b> {
+        credit: OpenInvariantCredit,
+        inv: Arc<AtomicInvariant<CrashInvPred, CrashInvState, CrashInvPred>>,
+        prefix: SeqPrefix<GWrite>,
+        writes: &'a VecDeque<JWrite<'b>>,
+    }
+
+    proof fn installed_durable_after_flush(
+        tracked durable: &SeqFrac<u8>,
+        tracked read: &SeqAuth<u8>,
+        tracked pending: &SeqPrefixAuth<GWrite>,
+        tracked writes: &VecDeque<JWrite>,
+        n: int
+    )
+        requires
+            0 <= n <= writes@.len(),
+            writes@.len() <= pending@.len(),
+            durable@ == read@,
+        ensures
+            durable@ == apply_writes(durable@, pending@.subrange(0, n)),
+        decreases
+            n
+    {
+        if n > 0 {
+            installed_durable_after_flush(durable, read, pending, writes, n-1);
+
+            // Set up for lemma_fold_left_split().
+            assert(pending@.subrange(0, n-1) == pending@.subrange(0, n).subrange(0, n-1));
+            assert(pending@.subrange(n-1, n) == pending@.subrange(0, n).subrange(n-1, n));
+
+            
+            assert(durable@ == apply_write(durable@, pending@[n-1]));
+        }
+    }
+
+    impl<'a, 'b> ReadLinearizer<Flush> for InstallationFlush<'a, 'b> {
+        type Completion = SeqPrefix<GWrite>;
+
+        closed spec fn namespaces(self) -> Set<int> {
+            set![self.inv.namespace()]
+        }
+
+        closed spec fn pre(self, op: Flush) -> bool {
+            &&& self.prefix.valid(self.inv.constant().pending_id)
+            &&& self.writes@.len() <= self.prefix@.len()
+            &&& self.inv.constant().durable_id == op.durable_id
+            &&& forall |i| 0 <= i < self.writes@.len() ==> {
+                &&& (#[trigger] self.writes@[i]).addr == self.prefix@[i].addr
+                &&& self.writes@[i].bytes@ == self.prefix@[i].data
+                &&& self.writes@[i].read_frac@.valid(op.read_id)
+                &&& self.writes@[i].read_frac@.off() == self.writes@[i].addr
+                &&& self.writes@[i].read_frac@@.len() == self.writes@[i].bytes@.len()
+            }
+        }
+
+        closed spec fn post(self, op: Flush, e: <Write as MutOperation>::ExecResult, r: Self::Completion) -> bool {
+            &&& r.valid(self.inv.constant().pending_id)
+            &&& r@ == self.prefix@.subrange(self.writes@.len() as int, self.prefix@.len() as int)
+        }
+
+        proof fn apply(tracked self, op: Flush, tracked r: &<Flush as ReadOperation>::Resource, e: &<Flush as ReadOperation>::ExecResult) -> tracked Self::Completion {
+            let tracked mut mself = self;
+            open_atomic_invariant_in_proof!(mself.credit => &mself.inv => inner => {
+                inner.pending.agree(&mself.prefix);
+                inner.durable.agree(&r.durable);
+
+                installed_durable_after_flush(&inner.durable, &r.read, &inner.pending, mself.writes, mself.writes@.len() as int);
+
+                inner.pending.truncate(&mut mself.prefix, mself.writes@.len() as int);
+            });
+
+            mself.prefix
+        }
+
+        proof fn peek(tracked &self, op: Flush, tracked r: &<Flush as ReadOperation>::Resource) {
         }
     }
 
@@ -128,39 +210,58 @@ verus! {
             self.inv.namespace()
         }
 
-        exec fn install<'a>(&self, mut writes: VecDeque<JWrite<'a>>, Tracked(prefix): Tracked<&mut SeqPrefix<GWrite>>) -> (new_writes: VecDeque<JWrite<'a>>)
+        exec fn install<'a>(&self, mut writes: VecDeque<JWrite<'a>>, Tracked(prefix): Tracked<SeqPrefix<GWrite>>) -> (result: (VecDeque<JWrite<'a>>, Tracked<SeqPrefix<GWrite>>))
             requires
-                writes@.len() <= old(prefix)@.len(),
-                old(prefix).valid(self.pending_id()),
+                self.inv(),
+                writes@.len() <= prefix@.len(),
+                prefix.valid(self.pending_id()),
                 forall |i| 0 <= i < writes@.len() ==> {
-                    &&& (#[trigger] writes@[i]).addr == old(prefix)@[i].addr
-                    &&& writes@[i].bytes@ == old(prefix)@[i].data
+                    &&& (#[trigger] writes@[i]).addr == prefix@[i].addr
+                    &&& writes@[i].bytes@ == prefix@[i].data
                     &&& writes@[i].bytes@.len() > 0
                     &&& writes@[i].read_frac@.valid(self.read_id())
-                    &&& writes@[i].read_frac@.off() <= writes@[i].addr
-                    &&& writes@[i].addr - writes@[i].read_frac@.off() + writes@[i].bytes@.len() <= writes@[i].read_frac@@.len()
+                    &&& writes@[i].read_frac@.off() == writes@[i].addr
+                    &&& writes@[i].read_frac@@.len() == writes@[i].bytes@.len()
                 },
             ensures
-                new_writes@.len() == writes@.len(),
-                prefix.valid(self.pending_id()),
-                prefix@ == old(prefix)@.subrange(writes@.len() as int, old(prefix)@.len() as int),
-                forall |i| 0 <= i < new_writes@.len() ==> {
-                    &&& (#[trigger] new_writes@[i]).addr == (#[trigger] writes@[i]).addr
-                    &&& new_writes@[i].bytes == writes@[i].bytes
-                    &&& new_writes@[i].read_frac@.valid(self.read_id())
-                    &&& new_writes@[i].read_frac@.off() == writes@[i].read_frac@.off()
-                    &&& new_writes@[i].read_frac@@ == update_seq(writes@[i].read_frac@@, writes@[i].addr - writes@[i].read_frac@.off(), writes@[i].bytes@)
+                result.0@.len() == writes@.len(),
+                result.1@.valid(self.pending_id()),
+                result.1@@ == prefix@.subrange(writes@.len() as int, prefix@.len() as int),
+                forall |i| 0 <= i < result.0@.len() ==> {
+                    &&& (#[trigger] result.0@[i]).addr == (#[trigger] writes@[i]).addr
+                    &&& result.0@[i].bytes == writes@[i].bytes
+                    &&& result.0@[i].read_frac@.valid(self.read_id())
+                    &&& result.0@[i].read_frac@.off() == writes@[i].read_frac@.off()
+                    &&& result.0@[i].read_frac@@ == writes@[i].bytes@
                 },
         {
             broadcast use vstd::std_specs::vecdeque::group_vec_dequeue_axioms;
             let nwrites = writes.len();
-            let mut new_writes = VecDeque::new();
+            let mut old_writes = writes;
+            let mut new_writes = VecDeque::<JWrite>::new();
             for i in 0..nwrites
                 invariant
-                    i + writes@.len() == nwrites,
+                    writes@.len() == nwrites,
+                    old_writes@ =~= writes@.subrange(i as int, writes@.len() as int),
                     i == new_writes@.len(),
+                    forall |j| 0 <= j < i ==> {
+                        &&& (#[trigger] new_writes@[j]).addr == writes@[j].addr
+                        &&& new_writes@[j].bytes == writes@[j].bytes
+                        &&& new_writes@[j].read_frac@.valid(self.read_id())
+                        &&& new_writes@[j].read_frac@.off() == writes@[j].read_frac@.off()
+                        &&& new_writes@[j].read_frac@@ == writes@[j].bytes@
+                    },
+                    forall |j| 0 <= j < writes@.len() ==> {
+                        &&& (#[trigger] writes@[j]).addr == prefix@[j].addr
+                        &&& writes@[j].bytes@ == prefix@[j].data
+                        &&& writes@[j].bytes@.len() > 0
+                        &&& writes@[j].read_frac@.valid(self.read_id())
+                        &&& writes@[j].read_frac@.off() == writes@[j].addr
+                        &&& writes@[j].read_frac@@.len() == writes@[j].bytes@.len()
+                    },
+                    self.pmem.durable_id() == self.inv.constant().durable_id,
             {
-                let w = writes.pop_front().unwrap();
+                let w = old_writes.pop_front().unwrap();
                 let credit = create_open_invariant_credit();
                 let tracked iw = InstallationWrite{
                     credit: credit.get(),
@@ -175,14 +276,17 @@ verus! {
                 });
             }
 
-            open_atomic_invariant!(&self.inv => inner => {
-                proof {
-                    inner.pending.truncate(prefix, nwrites as int);
-                    assume(CrashInvPred::inv(self.inv.constant(), inner));
-                }
-            });
+            let credit = create_open_invariant_credit();
+            let tracked ifl = InstallationFlush{
+                credit: credit.get(),
+                inv: self.inv.clone(),
+                prefix: prefix,
+                writes: &new_writes,
+            };
 
-            new_writes
+            let prefix = self.pmem.flush::<InstallationFlush>(Tracked(ifl));
+
+            (new_writes, prefix)
         }
     }
 

@@ -4,9 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-vstd = { git = "https://github.com/verus-lang/verus" }
-builtin = { git = "https://github.com/verus-lang/verus" }
-builtin_macros = { git = "https://github.com/verus-lang/verus" }
+# vstd = { git = "https://github.com/verus-lang/verus" }
+# builtin = { git = "https://github.com/verus-lang/verus" }
+# builtin_macros = { git = "https://github.com/verus-lang/verus" }
+vstd           = { path = "/home/nickolai/refsrc/verus/source/vstd" }
+builtin        = { path = "/home/nickolai/refsrc/verus/source/builtin" }
+builtin_macros = { path = "/home/nickolai/refsrc/verus/source/builtin_macros" }
 sl = { path = "../sl" }
 
 [package.metadata.verus]
