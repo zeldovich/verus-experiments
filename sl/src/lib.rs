@@ -19,3 +19,5 @@ pub mod allocator;
 // Misc code.
 pub mod ziqiao_frac_perm;
 pub mod typeinv;
+
+pub mod seq_prefix;
