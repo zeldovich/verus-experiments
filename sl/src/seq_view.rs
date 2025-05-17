@@ -136,7 +136,7 @@ verus! {
                 auth.inv(),
                 auth.id() == old(auth).id(),
                 self@ =~= v,
-                auth@ =~= Seq::new(old(auth)@.len(), |i: int| if self.off() <= i < self.off() + v.len() { v[i - self.off()] } else { old(auth)@[i] }),
+                auth@ =~= old(auth)@.update_range(self.off() as int, v),
         {
             self.update_map(&mut auth.auth, v);
         }
@@ -173,7 +173,7 @@ verus! {
                 auth.inv(),
                 auth.id() == old(auth).id(),
                 self@ =~= old(self)@.update_range(off, v),
-                auth@ =~= Seq::new(old(auth)@.len(), |i: int| if self.off() + off <= i < self.off() + off + v.len() { v[i - self.off() - off] } else { old(auth)@[i] }),
+                auth@ =~= old(auth)@.update_range(self.off() + off, v),
         {
             let tracked mut mid = self.split(off);
             let tracked mut end = mid.split(v.len() as int);
