@@ -8,17 +8,27 @@ use vstd::invariant::*;
 use vstd::logatom::*;
 
 use sl::seq_view::*;
+use sl::seq_helper::*;
 
 use super::pmem::*;
 use super::pmem_util::*;
 
 verus! {
+    // GWrite is the spec-level representation of a single Write.
+    pub struct GWrite {
+        pub addr: usize,
+        pub data: Seq<u8>,
+    }
+
     pub struct CrashInvState {
-        // client view of pmem's durable resource
+        // Client view of pmem's durable resource.
         durable: SeqFrac<u8>,
 
-        // authoritative view of journal's resource
+        // Authoritative view of committed state.
         committed: SeqAuth<u8>,
+
+        // Committed writes that have not been installed yet.
+        pending: Seq<GWrite>,
     }
 
     pub struct CrashInvPred {
@@ -26,14 +36,16 @@ verus! {
         committed_id: int,
     }
 
+    spec fn apply_writes(state: Seq<u8>, writes: Seq<GWrite>) -> Seq<u8> {
+        writes.fold_right(|w: GWrite, s| update_seq(s, w.addr as int, w.data), state)
+    }
+
     impl InvariantPredicate<CrashInvPred, CrashInvState> for CrashInvPred
     {
         closed spec fn inv(k: CrashInvPred, inner: CrashInvState) -> bool {
             &&& inner.durable.valid(k.durable_id)
             &&& inner.committed.valid(k.committed_id)
-
-            // XXX For now, no outstanding transactions...
-            &&& inner.committed@ == inner.durable@
+            &&& inner.committed@ == apply_writes(inner.durable@, inner.pending)
         }
     }
 
@@ -103,6 +115,7 @@ verus! {
         where
             PM: PersistentMemoryRegion,
     {
+        pmem: Arc<PM>,
         lk: RwLock<LockedJournal<PM>, Pred>,
         inv: AtomicInvariant<CrashInvPred, CrashInvState, CrashInvPred>,
     }
@@ -118,11 +131,16 @@ verus! {
         type NewState = bool;
 
         open spec fn requires(self, r: Self::Resource, new_state: Self::NewState, e: Self::ExecResult) -> bool {
+            &&& r.valid(self.committed_id)
             &&& e == new_state
         }
 
         open spec fn ensures(self, r: Self::Resource, new_r: Self::Resource, new_state: Self::NewState) -> bool {
-            &&& true
+            if new_state {
+                &&& new_r.valid(self.committed_id)
+            } else {
+                &&& new_r == r
+            }
         }
     }
 
@@ -134,15 +152,42 @@ verus! {
             self.inv.constant().committed_id
         }
 
-        pub fn commit<'a, Lin>(&self, writes: VecDeque<Write>, Tracked(lin): Tracked<Lin>) -> (result: (bool, Tracked<Lin::Completion>))
+        pub closed spec fn namespace(self) -> int {
+            self.inv.namespace()
+        }
+
+        fn install<'a, Lin>(&self, writes: &mut Vec<Write>)
+            where
+                Lin: MutLinearizer<Commit<'a>>
+        {
+            let nwrites = writes.len();
+            for i in 0..nwrites
+                invariant
+                    nwrites == writes.len(),
+            {
+                let w = &writes[i];
+                // self.pmem.write(w.addr, w.bytes, Tracked());
+            }
+        }
+
+        pub fn commit<'a, Lin>(&self, writes: &mut Vec<Write>, Tracked(lin): Tracked<Lin>) -> (result: (bool, Tracked<Lin::Completion>))
             where
                 Lin: MutLinearizer<Commit<'a>>
             requires
-                lin.pre(Commit{ committed_id: self.committed_id(), writes: writes@ }),
+                lin.pre(Commit{ committed_id: self.committed_id(), writes: old(writes)@ }),
+                !lin.namespaces().contains(self.namespace()),
             ensures
-                lin.post(Commit{ committed_id: self.committed_id(), writes: writes@ }, result.0, result.1@),
+                lin.post(Commit{ committed_id: self.committed_id(), writes: old(writes)@ }, result.0, result.1@),
         {
-            (false, 0)
+            let ghost op = Commit{ committed_id: self.committed_id(), writes: writes@ };
+            let commit = false;
+            let tracked complete;
+            open_atomic_invariant!(&self.inv => inner => {
+                proof {
+                    complete = lin.apply(op, &mut inner.committed, commit, &commit);
+                }
+            });
+            (commit, Tracked(complete))
         }
     }
 }
