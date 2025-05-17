@@ -6,6 +6,7 @@ use vstd::prelude::*;
 // use vstd::rwlock::*;
 use vstd::invariant::*;
 use vstd::logatom::*;
+use vstd::tokens::frac::*;
 
 use sl::seq_view::*;
 use sl::seq_prefix::*;
@@ -22,7 +23,7 @@ verus! {
 
     pub struct CrashInvState {
         // Client view of pmem's durable resource.
-        durable: SeqFrac<u8>,
+        durable: GhostVar<Seq<u8>>,
 
         // Authoritative view of committed state.
         committed: SeqAuth<u8>,
@@ -48,7 +49,7 @@ verus! {
     impl InvariantPredicate<CrashInvPred, CrashInvState> for CrashInvPred
     {
         closed spec fn inv(k: CrashInvPred, inner: CrashInvState) -> bool {
-            &&& inner.durable.valid(k.durable_id)
+            &&& inner.durable.id() == k.durable_id
             &&& inner.committed.valid(k.committed_id)
             &&& inner.pending.valid(k.pending_id)
             &&& inner.committed@ == apply_writes(inner.durable@, inner.pending@)
@@ -103,7 +104,7 @@ verus! {
     }
 
     proof fn installed_durable_after_flush(
-        tracked durable: &SeqFrac<u8>,
+        tracked durable: &GhostVar<Seq<u8>>,
         tracked read: &SeqAuth<u8>,
         tracked pending: &SeqPrefixAuth<GWrite>,
         tracked writes: &VecDeque<JWrite>,
@@ -125,7 +126,6 @@ verus! {
             assert(pending@.subrange(0, n-1) == pending@.subrange(0, n).subrange(0, n-1));
             assert(pending@.subrange(n-1, n) == pending@.subrange(0, n).subrange(n-1, n));
 
-            
             assert(durable@ == apply_write(durable@, pending@[n-1]));
         }
     }
@@ -159,7 +159,7 @@ verus! {
             let tracked mut mself = self;
             open_atomic_invariant_in_proof!(mself.credit => &mself.inv => inner => {
                 inner.pending.agree(&mself.prefix);
-                inner.durable.agree(&r.durable);
+                r.durable.agree(&inner.durable);
 
                 installed_durable_after_flush(&inner.durable, &r.read, &inner.pending, mself.writes, mself.writes@.len() as int);
 
