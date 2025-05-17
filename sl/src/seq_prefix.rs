@@ -78,6 +78,11 @@ verus! {
             self.r.loc()
         }
 
+        pub open spec fn valid(self, id: int) -> bool {
+            &&& self.inv()
+            &&& self.id() == id
+        }
+
         pub closed spec fn view(self) -> Seq<V> {
             match self.r.value() {
                 SeqPrefixView::Valid(Some(a), None) => a,
@@ -224,6 +229,11 @@ verus! {
 
         pub closed spec fn id(self) -> int {
             self.r.loc()
+        }
+
+        pub open spec fn valid(self, id: int) -> bool {
+            &&& self.inv()
+            &&& self.id() == id
         }
 
         pub closed spec fn view(self) -> Seq<V> {
