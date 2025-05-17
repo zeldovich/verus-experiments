@@ -1,6 +1,7 @@
 use vstd::prelude::*;
 use vstd::rwlock::*;
 use vstd::logatom::*;
+use vstd::tokens::frac::*;
 
 use sl::seq_view::*;
 
@@ -24,7 +25,7 @@ verus! {
     impl RwLockPredicate<LockedState> for LockPred {
         closed spec fn inv(self, v: LockedState) -> bool {
             &&& v.r@.read.valid(self.read_id)
-            &&& v.r@.durable.valid(self.durable_id)
+            &&& v.r@.durable.id() == self.durable_id
             &&& v.data@ == v.r@.read@
             &&& v.data@ == v.r@.durable@
         }
@@ -35,19 +36,18 @@ verus! {
     }
 
     impl SimpleMem {
-        pub exec fn new(sz: usize) -> (result: (SimpleMem, Tracked<SeqFrac<u8>>, Tracked<SeqFrac<u8>>))
+        pub exec fn new(sz: usize) -> (result: (SimpleMem, Tracked<SeqFrac<u8>>, Tracked<GhostVar<Seq<u8>>>))
             ensures
                 result.1@.valid(result.0.read_id()),
-                result.2@.valid(result.0.durable_id()),
+                result.2@.id() == result.0.durable_id(),
                 result.1@.off() == 0,
-                result.2@.off() == 0,
                 result.1@@.len() == sz,
                 result.2@@ == result.1@@,
         {
             let mut data = Vec::new();
             data.resize(sz, 0);
             let tracked (read, read_frac) = SeqAuth::new(data@);
-            let tracked (durable, durable_frac) = SeqAuth::new(data@);
+            let tracked (durable, durable_frac) = GhostVarAuth::new(data@);
             let locked = LockedState{
                 data: data,
                 r: Tracked(PMResource{
@@ -140,7 +140,7 @@ verus! {
                     state.data@.len() <= usize::MAX,
                     state.data@ == state.r@.read@.update_range(addr as int, bytes@.subrange(0, i as int)),
                     state.r@.read.valid(op.read_id),
-                    state.r@.durable.valid(op.durable_id),
+                    state.r@.durable.id() == op.durable_id,
                     state.r@.read@ == state.r@.durable@,
             {
                 state.data[addr+i] = bytes[i];

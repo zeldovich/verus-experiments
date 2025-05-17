@@ -1,11 +1,12 @@
 use vstd::prelude::*;
 use vstd::logatom::*;
+use vstd::tokens::frac::*;
 use sl::seq_view::*;
 
 verus! {
     pub struct PMResource {
         pub read: SeqAuth<u8>,
-        pub durable: SeqAuth<u8>,
+        pub durable: GhostVarAuth<Seq<u8>>,
     }
 
     pub struct Read {
@@ -55,20 +56,21 @@ verus! {
 
         open spec fn requires(self, r: Self::Resource, new_state: Self::NewState, e: Self::ExecResult) -> bool {
             &&& r.read.valid(self.read_id)
-            &&& r.durable.valid(self.durable_id)
+            &&& r.durable.id() == self.durable_id
             &&& can_result_from_write(new_state, r.durable@.subrange(self.addr as int, self.addr as int + self.data.len()), 0, self.data)
+            &&& r.read@.len() == r.durable@.len()
         }
 
         open spec fn ensures(self, r: Self::Resource, new_r: Self::Resource, new_state: Self::NewState) -> bool {
             &&& new_r.read.valid(self.read_id)
-            &&& new_r.durable.valid(self.durable_id)
+            &&& new_r.durable.id() == self.durable_id
             &&& new_r.read@ == r.read@.update_range(self.addr as int, self.data)
             &&& new_r.durable@ == r.durable@.update_range(self.addr as int, new_state)
         }
 
         open spec fn peek_requires(self, r: Self::Resource) -> bool {
             &&& r.read.valid(self.read_id)
-            &&& r.durable.valid(self.durable_id)
+            &&& r.durable.id() == self.durable_id
         }
 
         open spec fn peek_ensures(self, r: Self::Resource) -> bool {
@@ -87,7 +89,7 @@ verus! {
 
         open spec fn requires(self, r: Self::Resource, e: Self::ExecResult) -> bool {
             &&& r.read.valid(self.read_id)
-            &&& r.durable.valid(self.durable_id)
+            &&& r.durable.id() == self.durable_id
             &&& r.read@ == r.durable@
         }
     }
