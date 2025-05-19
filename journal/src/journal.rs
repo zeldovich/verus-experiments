@@ -90,18 +90,18 @@ verus! {
         pub read_frac: Tracked<SeqFrac<u8>>,
     }
 
-    impl<'a> View for JWrite<'a> {
+    impl<'a> DeepView for JWrite<'a> {
         type V = GWrite;
 
-        closed spec fn view(&self) -> GWrite {
+        closed spec fn deep_view(&self) -> GWrite {
             GWrite{
                 addr: self.addr,
-                data: self.bytes@,
+                data: self.bytes.deep_view(),
             }
         }
     }
 
-    impl ViewEncoding for GWrite {
+    impl Encoding for GWrite {
         closed spec fn encoding(self) -> Seq<u8> {
             self.addr.encoding() + self.data.encoding()
         }
@@ -119,13 +119,13 @@ verus! {
         pub bytes: Vec<u8>,
     }
 
-    impl View for JWriteVec {
+    impl DeepView for JWriteVec {
         type V = GWrite;
 
-        closed spec fn view(&self) -> GWrite {
+        closed spec fn deep_view(&self) -> GWrite {
             GWrite{
                 addr: self.addr,
-                data: self.bytes@,
+                data: self.bytes.deep_view(),
             }
         }
     }
@@ -140,10 +140,10 @@ verus! {
     impl Decodable for JWriteVec {
         exec fn decode(buf: &mut Vec<u8>, Ghost(oldv): Ghost<Self>) -> (result: Self)
         {
-            assert(oldv.addr@.encoding().is_prefix_of(oldv@.encoding()));
+            assert(oldv.addr.deep_view().encoding().is_prefix_of(oldv.deep_view().encoding()));
             let addr = usize::decode(buf, Ghost(oldv.addr));
 
-            assert(oldv.bytes@.encoding().is_prefix_of(oldv@.encoding().skip(oldv.addr@.encoding().len() as int)));
+            assert(oldv.bytes.deep_view().encoding().is_prefix_of(oldv.deep_view().encoding().skip(oldv.addr.deep_view().encoding().len() as int)));
             let bytes = Vec::decode(buf, Ghost(oldv.bytes));
 
             Self{
