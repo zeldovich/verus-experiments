@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use vstd::prelude::*;
 // use vstd::bytes::*;
-// use vstd::rwlock::*;
+use vstd::rwlock::*;
 use vstd::invariant::*;
 use vstd::logatom::*;
 use vstd::tokens::frac::*;
@@ -250,12 +250,30 @@ verus! {
         }
     }
 
+    struct InstallerState {
+        prefix: Tracked<SeqPrefix<GWrite>>,
+    }
+
+    struct InstallerPred {
+        pending_id: int,
+    }
+
+    impl RwLockPredicate<InstallerState> for InstallerPred {
+        closed spec fn inv(self, s: InstallerState) -> bool {
+            &&& s.prefix@.valid(self.pending_id)
+
+            // XXX for now, no concurrency for installation; one transaction at a time
+            &&& s.prefix@@.len() == 0
+        }
+    }
+
     pub struct Journal<PM>
         where
             PM: PersistentMemoryRegion,
     {
         pmem: Arc<PM>,
         inv: Arc<AtomicInvariant<CrashInvPred, CrashInvState, CrashInvPred>>,
+        installer: RwLock<InstallerState, InstallerPred>,
     }
 
     impl<PM> Journal<PM>
@@ -276,6 +294,7 @@ verus! {
 
         pub closed spec fn inv(self) -> bool {
             &&& self.inv.constant().durable_id == self.pmem.durable_id()
+            &&& self.inv.constant().pending_id == self.installer.pred().pending_id
         }
 
         spec fn pending_id(self) -> int {
@@ -362,6 +381,47 @@ verus! {
 
             (Tracked(new_read_fracs), prefix)
         }
+
+        exec fn log<'a>(&self, mut writes: VecDeque<JWrite<'a>>) -> (result: (Tracked<Seq<SeqFrac<u8>>>))
+            requires
+                self.inv(),
+                forall |i| 0 <= i < writes@.len() ==> {
+                    &&& (#[trigger] writes@[i]).bytes@.len() > 0
+                    &&& writes@[i].read_frac@.valid(self.read_id())
+                    &&& writes@[i].read_frac@.off() == writes@[i].addr
+                    &&& writes@[i].read_frac@@.len() == writes@[i].bytes@.len()
+                },
+            ensures
+                result@.len() == writes@.len(),
+                forall |i| 0 <= i < result@.len() ==> {
+                    &&& (#[trigger] result@[i]).valid(self.read_id())
+                    &&& result@[i].off() == writes@[i].read_frac@.off()
+                    &&& result@[i]@ == writes@[i].bytes@
+                },
+        {
+            let ghost gwrites = Seq::new(writes@.len(), |i: int| GWrite{
+                addr: writes@[i].addr,
+                data: writes@[i].bytes@,
+            });
+
+            let (installer, handle) = self.installer.acquire_write();
+            let tracked mut prefix = installer.prefix.get();
+            open_atomic_invariant!(&self.inv => inner => {
+                proof {
+                    inner.pending.append(gwrites);
+                    inner.pending.advance(&mut prefix, gwrites.len() as int);
+                }
+            });
+
+            let (Tracked(res), Tracked(prefix)) = self.install(writes, Tracked(prefix));
+            let installer = InstallerState{
+                prefix: Tracked(prefix),
+            };
+
+            handle.release_write(installer);
+
+            Tracked(res)
+        }
     }
 
 /*
@@ -373,12 +433,6 @@ verus! {
         addr: usize,
         len: usize,
         fracs: Tracked<Fracs>,
-    }
-
-    pub struct Write<'a> {
-        pub addr: usize,
-        pub bytes: &'a [u8],
-        pub read_frac: Tracked<SeqFrac<u8>>,
     }
 
     impl<PM> LockedJournal<PM>
@@ -415,18 +469,6 @@ verus! {
         }
     }
 
-    pub struct Pred {
-    }
-
-    impl<PM> RwLockPredicate<LockedJournal<PM>> for Pred
-        where
-            PM: PersistentMemoryRegion,
-    {
-        closed spec fn inv(self, j: LockedJournal<PM>) -> bool {
-            &&& j.inv()
-        }
-    }
-
     pub struct Commit<'a> {
         pub committed_id: int,
         pub writes: Seq<Write<'a>>,
@@ -455,20 +497,6 @@ verus! {
         where
             PM: PersistentMemoryRegion,
     {
-        fn install<'a, Lin>(&self, writes: &mut Vec<Write>)
-            where
-                Lin: MutLinearizer<Commit<'a>>
-        {
-            let nwrites = writes.len();
-            for i in 0..nwrites
-                invariant
-                    nwrites == writes.len(),
-            {
-                let w = &writes[i];
-                // self.pmem.write(w.addr, w.bytes, Tracked());
-            }
-        }
-
         pub fn commit<'a, Lin>(&self, writes: &mut Vec<Write>, Tracked(lin): Tracked<Lin>) -> (result: (bool, Tracked<Lin::Completion>))
             where
                 Lin: MutLinearizer<Commit<'a>>
