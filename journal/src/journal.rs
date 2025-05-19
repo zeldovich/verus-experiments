@@ -12,6 +12,7 @@ use sl::seq_view::*;
 use sl::seq_prefix::*;
 
 use super::pmem::*;
+use super::codec::*;
 // use super::pmem_util::*;
 
 verus! {
@@ -69,7 +70,7 @@ verus! {
             writes.len()
     {
         if writes.len() > 0 {
-            apply_writes_range_equal(state0, state1, writes.subrange(0, writes.len()-1), addr, len);
+            apply_writes_range_equal(state0, state1, writes.take(writes.len()-1), addr, len);
         }
     }
 
@@ -89,6 +90,70 @@ verus! {
         pub read_frac: Tracked<SeqFrac<u8>>,
     }
 
+    impl<'a> View for JWrite<'a> {
+        type V = GWrite;
+
+        closed spec fn view(&self) -> GWrite {
+            GWrite{
+                addr: self.addr,
+                data: self.bytes@,
+            }
+        }
+    }
+
+/*
+    impl JWrite {
+        closed spec fn view_encoding(v: GWrite) -> Seq<u8> {
+            usize::view_encoding(v.addr) + v.data
+        }
+
+        exec fn encode(&self, buf: &mut Vec<u8>)
+            ensures
+                buf@ =~= old(buf)@ + 
+    }
+    */
+
+    struct JWriteVec {
+        pub addr: usize,
+        pub bytes: Vec<u8>,
+    }
+
+    impl View for JWriteVec {
+        type V = GWrite;
+
+        closed spec fn view(&self) -> GWrite {
+            GWrite{
+                addr: self.addr,
+                data: self.bytes@,
+            }
+        }
+    }
+
+    impl Serializable for JWriteVec {
+        closed spec fn view_encoding(v: GWrite) -> Seq<u8> {
+            usize::view_encoding(v.addr) + Vec::<u8>::view_encoding(v.data)
+        }
+
+        exec fn encode(&self, buf: &mut Vec<u8>) {
+            self.addr.encode(buf);
+            self.bytes.encode(buf);
+        }
+
+        exec fn decode(buf: &mut Vec<u8>, Ghost(oldv): Ghost<Self>) -> (result: Self)
+        {
+            assert(oldv.addr.encoding().is_prefix_of(oldv.encoding()));
+            let addr = usize::decode(buf, Ghost(oldv.addr));
+
+            assert(oldv.bytes.encoding().is_prefix_of(oldv.encoding().skip(oldv.addr.encoding().len() as int)));
+            let bytes = Vec::decode(buf, Ghost(oldv.bytes));
+
+            Self{
+                addr: addr,
+                bytes: bytes,
+            }
+        }
+    }
+
     struct InstallationWrite<'a> {
         credit: OpenInvariantCredit,
         inv: Arc<AtomicInvariant<CrashInvPred, CrashInvState, CrashInvPred>>,
@@ -106,7 +171,7 @@ verus! {
             apply_writes(durable, pending) == apply_writes(durable.update_range(addr, data), pending)
     {
         let durableU = durable.update_range(addr, data);
-        let pending0 = pending.subrange(0, pos);
+        let pending0 = pending.take(pos);
         let dpos  = apply_writes(durable,  pending0);
         let dposU = apply_writes(durableU, pending0);
         apply_writes_range_equal(durable, durableU, pending0, addr, data.len() as int);
@@ -114,11 +179,11 @@ verus! {
         let w = pending[pos];
         assert(apply_write(dpos, w) == apply_write(dposU, w));
 
-        let pending1 = pending.subrange(pos, pending.len() as int);
+        let pending1 = pending.skip(pos);
 
         reveal_with_fuel(Seq::fold_left, 2);
-        assert(apply_writes(dpos,  pending1.subrange(0, 1)) == apply_write(dpos,  w));
-        assert(apply_writes(dposU, pending1.subrange(0, 1)) == apply_write(dposU, w));
+        assert(apply_writes(dpos,  pending1.take(1)) == apply_write(dpos,  w));
+        assert(apply_writes(dposU, pending1.take(1)) == apply_write(dposU, w));
     }
 
     impl<'a> MutLinearizer<Write> for InstallationWrite<'a> {
@@ -193,7 +258,7 @@ verus! {
                 &&& readfracs[i]@ == pending@[i].data
             },
         ensures
-            durable@ == apply_writes(durable@, pending@.subrange(0, n)),
+            durable@ == apply_writes(durable@, pending@.take(n)),
         decreases
             n
     {
@@ -229,7 +294,7 @@ verus! {
 
         closed spec fn post(self, op: Flush, e: <Write as MutOperation>::ExecResult, r: Self::Completion) -> bool {
             &&& r.valid(self.inv.constant().pending_id)
-            &&& r@ == self.prefix@.subrange(self.readfracs.len() as int, self.prefix@.len() as int)
+            &&& r@ == self.prefix@.skip(self.readfracs.len() as int)
         }
 
         proof fn apply(tracked self, op: Flush, tracked r: &<Flush as ReadOperation>::Resource, e: &<Flush as ReadOperation>::ExecResult) -> tracked Self::Completion {
@@ -321,7 +386,7 @@ verus! {
             ensures
                 result.0@.len() == writes@.len(),
                 result.1@.valid(self.pending_id()),
-                result.1@@ == prefix@.subrange(writes@.len() as int, prefix@.len() as int),
+                result.1@@ == prefix@.skip(writes@.len() as int),
                 forall |i| 0 <= i < result.0@.len() ==> {
                     &&& (#[trigger] result.0@[i]).valid(self.read_id())
                     &&& result.0@[i].off() == writes@[i].read_frac@.off()
@@ -335,7 +400,7 @@ verus! {
             for i in 0..nwrites
                 invariant
                     writes@.len() == nwrites,
-                    old_writes@ =~= writes@.subrange(i as int, writes@.len() as int),
+                    old_writes@ =~= writes@.skip(i as int),
                     i == new_read_fracs.len(),
                     forall |j| 0 <= j < i ==> {
                         &&& (#[trigger] new_read_fracs[j]).valid(self.read_id())
