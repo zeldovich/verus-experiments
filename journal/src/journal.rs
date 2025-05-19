@@ -140,10 +140,10 @@ verus! {
     impl Decodable for JWriteVec {
         exec fn decode(buf: &mut Vec<u8>, Ghost(oldv): Ghost<Self>) -> (result: Self)
         {
-            assert(oldv.addr.deep_view().encoding().is_prefix_of(oldv.deep_view().encoding()));
-            let addr = usize::decode(buf, Ghost(oldv.addr));
+            broadcast use is_prefix_of_trans;
+            broadcast use is_prefix_of_skip;
 
-            assert(oldv.bytes.deep_view().encoding().is_prefix_of(oldv.deep_view().encoding().skip(oldv.addr.deep_view().encoding().len() as int)));
+            let addr = usize::decode(buf, Ghost(oldv.addr));
             let bytes = Vec::decode(buf, Ghost(oldv.bytes));
 
             Self{

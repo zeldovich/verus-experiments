@@ -113,9 +113,9 @@ verus! {
         }
     }
 
-    pub proof fn seq_u8_encoding_simplify(s: Seq<u8>)
+    pub broadcast proof fn seq_u8_encoding_simplify(s: Seq<u8>)
         ensures
-            s.encoding() == seq_u8_encoding_simpler(s)
+            #[trigger] s.encoding() == seq_u8_encoding_simpler(s)
     {
         flatten_encoding_u8(s);
     }
@@ -123,7 +123,7 @@ verus! {
     impl Encodable for Vec<u8> {
         exec fn encode(&self, buf: &mut Vec<u8>)
         {
-            proof { seq_u8_encoding_simplify(self.deep_view()); }
+            broadcast use seq_u8_encoding_simplify;
 
             self.len().encode(buf);
             buf.extend_from_slice(self.as_slice());
@@ -133,20 +133,38 @@ verus! {
     impl<'a> Encodable for &'a [u8] {
         exec fn encode(&self, buf: &mut Vec<u8>)
         {
-            proof { seq_u8_encoding_simplify(self.deep_view()); }
+            broadcast use seq_u8_encoding_simplify;
 
             self.len().encode(buf);
             buf.extend_from_slice(self);
         }
     }
 
+    pub broadcast proof fn is_prefix_of_trans<T>(a: Seq<T>, c: Seq<T>)
+        requires
+            ({
+                ||| exists |b: Seq<T>| a.is_prefix_of(b) && #[trigger] b.is_prefix_of(c)
+                ||| exists |b: Seq<T>| #[trigger] a.is_prefix_of(b) && b.is_prefix_of(c)
+            })
+        ensures
+            #[trigger] a.is_prefix_of(c),
+    {}
+
+    pub broadcast proof fn is_prefix_of_skip<T>(a: Seq<T>, b: Seq<T>, c: Seq<T>, n: int)
+        requires
+            0 <= n <= b.len(),
+        ensures
+            a.is_prefix_of(b.skip(n)) && #[trigger] b.is_prefix_of(c) ==> #[trigger] a.is_prefix_of(c.skip(n)),
+    {}
+
     impl Decodable for Vec<u8> {
         exec fn decode(buf: &mut Vec<u8>, Ghost(oldv): Ghost<Self>) -> (result: Self)
         {
-            assert(oldv.len().deep_view().encoding().is_prefix_of(oldv.deep_view().encoding()));
+            broadcast use is_prefix_of_trans;
+            broadcast use seq_u8_encoding_simplify;
+
             let len = usize::decode(buf, Ghost(oldv.len()));
 
-            proof { seq_u8_encoding_simplify(oldv.deep_view()); }
             assert(oldv.deep_view().is_prefix_of(oldv.deep_view().encoding().skip(oldv.len().deep_view().encoding().len() as int)));
             let mut venc = buf.split_off(len);
             std::mem::swap(buf, &mut venc);
