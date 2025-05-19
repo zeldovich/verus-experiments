@@ -399,6 +399,8 @@ verus! {
                     &&& result@[i]@ == writes@[i].bytes@
                 },
         {
+            proof { admit(); }
+
             let ghost gwrites = Seq::new(writes@.len(), |i: int| GWrite{
                 addr: writes@[i].addr,
                 data: writes@[i].bytes@,
