@@ -101,17 +101,18 @@ verus! {
         }
     }
 
-/*
-    impl JWrite {
-        closed spec fn view_encoding(v: GWrite) -> Seq<u8> {
-            usize::view_encoding(v.addr) + v.data
+    impl ViewEncoding for GWrite {
+        closed spec fn encoding(self) -> Seq<u8> {
+            self.addr.encoding() + self.data.encoding()
         }
-
-        exec fn encode(&self, buf: &mut Vec<u8>)
-            ensures
-                buf@ =~= old(buf)@ + 
     }
-    */
+
+    impl<'a> Encodable for JWrite<'a> {
+        exec fn encode(&self, buf: &mut Vec<u8>) {
+            self.addr.encode(buf);
+            self.bytes.encode(buf);
+        }
+    }
 
     struct JWriteVec {
         pub addr: usize,
@@ -129,22 +130,20 @@ verus! {
         }
     }
 
-    impl Serializable for JWriteVec {
-        closed spec fn view_encoding(v: GWrite) -> Seq<u8> {
-            usize::view_encoding(v.addr) + Vec::<u8>::view_encoding(v.data)
-        }
-
+    impl Encodable for JWriteVec {
         exec fn encode(&self, buf: &mut Vec<u8>) {
             self.addr.encode(buf);
             self.bytes.encode(buf);
         }
+    }
 
+    impl Decodable for JWriteVec {
         exec fn decode(buf: &mut Vec<u8>, Ghost(oldv): Ghost<Self>) -> (result: Self)
         {
-            assert(oldv.addr.encoding().is_prefix_of(oldv.encoding()));
+            assert(oldv.addr@.encoding().is_prefix_of(oldv@.encoding()));
             let addr = usize::decode(buf, Ghost(oldv.addr));
 
-            assert(oldv.bytes.encoding().is_prefix_of(oldv.encoding().skip(oldv.addr.encoding().len() as int)));
+            assert(oldv.bytes@.encoding().is_prefix_of(oldv@.encoding().skip(oldv.addr@.encoding().len() as int)));
             let bytes = Vec::decode(buf, Ghost(oldv.bytes));
 
             Self{
