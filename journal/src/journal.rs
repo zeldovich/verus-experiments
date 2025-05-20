@@ -9,7 +9,7 @@ use vstd::logatom::*;
 use vstd::tokens::frac::*;
 
 use sl::seq_view::*;
-use sl::seq_prefix::*;
+// use sl::seq_prefix::*;
 
 use super::pmem::*;
 use super::codec::*;
@@ -30,7 +30,9 @@ verus! {
         committed: SeqAuth<u8>,
 
         // Committed writes that have not been installed yet.
-        pending: SeqPrefixAuth<GWrite>,
+        // Currently there's just one transaction that could be in progress,
+        // but could eventually pipeline this.
+        pending: GhostVarAuth<Seq<GWrite>>,
     }
 
     pub struct CrashInvPred {
@@ -39,11 +41,11 @@ verus! {
         pending_id: int,
     }
 
-    spec fn apply_write(state: Seq<u8>, write: GWrite) -> Seq<u8> {
+    pub open spec fn apply_write(state: Seq<u8>, write: GWrite) -> Seq<u8> {
         state.update_range(write.addr as int, write.data)
     }
 
-    spec fn apply_writes(state: Seq<u8>, writes: Seq<GWrite>) -> Seq<u8> {
+    pub open spec fn apply_writes(state: Seq<u8>, writes: Seq<GWrite>) -> Seq<u8> {
         writes.fold_left(state, |s, w: GWrite| apply_write(s, w))
     }
 
@@ -79,7 +81,7 @@ verus! {
         closed spec fn inv(k: CrashInvPred, inner: CrashInvState) -> bool {
             &&& inner.durable.id() == k.durable_id
             &&& inner.committed.valid(k.committed_id)
-            &&& inner.pending.valid(k.pending_id)
+            &&& inner.pending.id() == k.pending_id
             &&& inner.committed@ == apply_writes(inner.durable@, inner.pending@)
         }
     }
@@ -157,7 +159,7 @@ verus! {
         credit: OpenInvariantCredit,
         inv: Arc<AtomicInvariant<CrashInvPred, CrashInvState, CrashInvPred>>,
         read: SeqFrac<u8>,
-        prefix: &'a SeqPrefix<GWrite>,
+        prefix: &'a GhostVar<Seq<GWrite>>,
         prefixpos: usize,
     }
 
@@ -200,7 +202,7 @@ verus! {
             &&& self.read.off() == op.addr
             &&& self.read@.len() == op.data.len()
 
-            &&& self.prefix.valid(self.inv.constant().pending_id)
+            &&& self.prefix.id() == self.inv.constant().pending_id
             &&& self.prefix@[self.prefixpos as int].addr == op.addr
             &&& self.prefix@[self.prefixpos as int].data == op.data
             &&& self.prefixpos < self.prefix@.len()
@@ -235,14 +237,14 @@ verus! {
     struct InstallationFlush<'a> {
         credit: OpenInvariantCredit,
         inv: Arc<AtomicInvariant<CrashInvPred, CrashInvState, CrashInvPred>>,
-        prefix: SeqPrefix<GWrite>,
+        prefix: GhostVar<Seq<GWrite>>,
         readfracs: &'a Seq<SeqFrac<u8>>,
     }
 
     proof fn installed_durable_after_flush(
         tracked durable: &GhostVar<Seq<u8>>,
         tracked read: &SeqAuth<u8>,
-        tracked pending: &SeqPrefixAuth<GWrite>,
+        tracked pending: &GhostVarAuth<Seq<GWrite>>,
         tracked readfracs: &Seq<SeqFrac<u8>>,
         n: int
     )
@@ -274,15 +276,15 @@ verus! {
     }
 
     impl<'a> ReadLinearizer<Flush> for InstallationFlush<'a> {
-        type Completion = SeqPrefix<GWrite>;
+        type Completion = GhostVar<Seq<GWrite>>;
 
         closed spec fn namespaces(self) -> Set<int> {
             set![self.inv.namespace()]
         }
 
         closed spec fn pre(self, op: Flush) -> bool {
-            &&& self.prefix.valid(self.inv.constant().pending_id)
-            &&& self.readfracs.len() <= self.prefix@.len()
+            &&& self.prefix.id() == self.inv.constant().pending_id
+            &&& self.readfracs.len() == self.prefix@.len()
             &&& self.inv.constant().durable_id == op.durable_id
             &&& forall |i| 0 <= i < self.readfracs.len() ==> {
                 &&& (#[trigger] self.readfracs[i]).valid(op.read_id)
@@ -292,8 +294,8 @@ verus! {
         }
 
         closed spec fn post(self, op: Flush, e: <Write as MutOperation>::ExecResult, r: Self::Completion) -> bool {
-            &&& r.valid(self.inv.constant().pending_id)
-            &&& r@ == self.prefix@.skip(self.readfracs.len() as int)
+            &&& r.id() == self.inv.constant().pending_id
+            &&& r@.len() == 0
         }
 
         proof fn apply(tracked self, op: Flush, tracked r: &<Flush as ReadOperation>::Resource, e: &<Flush as ReadOperation>::ExecResult) -> tracked Self::Completion {
@@ -304,7 +306,7 @@ verus! {
 
                 installed_durable_after_flush(&inner.durable, &r.read, &inner.pending, mself.readfracs, mself.readfracs.len() as int);
 
-                inner.pending.truncate(&mut mself.prefix, mself.readfracs.len() as int);
+                inner.pending.update(&mut mself.prefix, Seq::empty());
             });
 
             mself.prefix
@@ -315,7 +317,7 @@ verus! {
     }
 
     struct InstallerState {
-        prefix: Tracked<SeqPrefix<GWrite>>,
+        prefix: Tracked<GhostVar<Seq<GWrite>>>,
     }
 
     struct InstallerPred {
@@ -324,7 +326,7 @@ verus! {
 
     impl RwLockPredicate<InstallerState> for InstallerPred {
         closed spec fn inv(self, s: InstallerState) -> bool {
-            &&& s.prefix@.valid(self.pending_id)
+            &&& s.prefix@.id() == self.pending_id
 
             // XXX for now, no concurrency for installation; one transaction at a time
             &&& s.prefix@@.len() == 0
@@ -369,11 +371,11 @@ verus! {
             self.inv.namespace()
         }
 
-        exec fn install<'a>(&self, mut writes: VecDeque<JWrite<'a>>, Tracked(prefix): Tracked<SeqPrefix<GWrite>>) -> (result: (Tracked<Seq<SeqFrac<u8>>>, Tracked<SeqPrefix<GWrite>>))
+        exec fn install<'a>(&self, mut writes: VecDeque<JWrite<'a>>, Tracked(prefix): Tracked<GhostVar<Seq<GWrite>>>) -> (result: (Tracked<Seq<SeqFrac<u8>>>, Tracked<GhostVar<Seq<GWrite>>>))
             requires
                 self.inv(),
-                writes@.len() <= prefix@.len(),
-                prefix.valid(self.pending_id()),
+                writes@.len() == prefix@.len(),
+                prefix.id() == self.pending_id(),
                 forall |i| 0 <= i < writes@.len() ==> {
                     &&& (#[trigger] writes@[i]).addr == prefix@[i].addr
                     &&& writes@[i].bytes@ == prefix@[i].data
@@ -384,8 +386,8 @@ verus! {
                 },
             ensures
                 result.0@.len() == writes@.len(),
-                result.1@.valid(self.pending_id()),
-                result.1@@ == prefix@.skip(writes@.len() as int),
+                result.1@.id() == self.pending_id(),
+                result.1@@.len() == 0,
                 forall |i| 0 <= i < result.0@.len() ==> {
                     &&& (#[trigger] result.0@[i]).valid(self.read_id())
                     &&& result.0@[i].off() == writes@[i].read_frac@.off()
@@ -415,7 +417,7 @@ verus! {
                         &&& writes@[j].read_frac@@.len() == writes@[j].bytes@.len()
                     },
                     self.pmem.durable_id() == self.inv.constant().durable_id,
-                    prefix.valid(self.inv.constant().pending_id),
+                    prefix.id() == self.inv.constant().pending_id,
                     nwrites <= prefix@.len(),
             {
                 let w = old_writes.pop_front().unwrap();
@@ -446,7 +448,9 @@ verus! {
             (Tracked(new_read_fracs), prefix)
         }
 
-        exec fn log<'a>(&self, mut writes: VecDeque<JWrite<'a>>) -> (result: (Tracked<Seq<SeqFrac<u8>>>))
+        exec fn log<Lin, 'a>(&self, mut writes: VecDeque<JWrite<'a>>, Tracked(lin): Tracked<Lin>) -> (result: (Tracked<Seq<SeqFrac<u8>>>, Tracked<Lin::Completion>))
+            where
+                Lin: MutLinearizer<Commit>,
             requires
                 self.inv(),
                 forall |i| 0 <= i < writes@.len() ==> {
@@ -455,29 +459,43 @@ verus! {
                     &&& writes@[i].read_frac@.off() == writes@[i].addr
                     &&& writes@[i].read_frac@@.len() == writes@[i].bytes@.len()
                 },
+                lin.pre(Commit{ committed_id: self.committed_id(), writes: writes.deep_view() }),
+                !lin.namespaces().contains(self.namespace()),
             ensures
-                result@.len() == writes@.len(),
-                forall |i| 0 <= i < result@.len() ==> {
-                    &&& (#[trigger] result@[i]).valid(self.read_id())
-                    &&& result@[i].off() == writes@[i].read_frac@.off()
-                    &&& result@[i]@ == writes@[i].bytes@
+                result.0@.len() == writes@.len(),
+                forall |i| 0 <= i < result.0@.len() ==> {
+                    &&& (#[trigger] result.0@[i]).valid(self.read_id())
+                    &&& result.0@[i].off() == writes@[i].read_frac@.off()
+                    &&& result.0@[i]@ == writes@[i].bytes@
                 },
+                lin.post(Commit{ committed_id: self.committed_id(), writes: writes.deep_view() }, true, result.1@),
         {
-            proof { admit(); }
-
-            let ghost gwrites = Seq::new(writes@.len(), |i: int| GWrite{
-                addr: writes@[i].addr,
-                data: writes@[i].bytes@,
-            });
+            let ghost gwrites = writes.deep_view();
+            let ghost op = Commit{
+                committed_id: self.committed_id(),
+                writes: gwrites,
+            };
 
             let (installer, handle) = self.installer.acquire_write();
             let tracked mut prefix = installer.prefix.get();
+            let tracked mut complete;
             open_atomic_invariant!(&self.inv => inner => {
                 proof {
-                    inner.pending.append(gwrites);
-                    inner.pending.advance(&mut prefix, gwrites.len() as int);
+                    complete = lin.apply(op, &mut inner.committed, true, &true);
+
+                    let pending0 = inner.pending@;
+
+                    inner.pending.update(&mut prefix, gwrites);
+
+                    // Set up for lemma_fold_left_split().
+                    assert(inner.pending@.take(pending0.len() as int) == pending0);
+                    assert(inner.pending@.skip(pending0.len() as int) == gwrites);
+
+                    assert(CrashInvPred::inv(self.inv.constant(), inner));
                 }
             });
+
+            assert(forall |i: int| 0 <= i < writes@.len() ==> gwrites[i].data == (#[trigger] writes@[i]).bytes@);
 
             let (Tracked(res), Tracked(prefix)) = self.install(writes, Tracked(prefix));
             let installer = InstallerState{
@@ -486,61 +504,16 @@ verus! {
 
             handle.release_write(installer);
 
-            Tracked(res)
+            (Tracked(res), Tracked(complete))
         }
     }
 
-/*
-    pub struct LockedJournal<PM>
-        where
-            PM: PersistentMemoryRegion,
-    {
-        pmem: Arc<PM>,
-        addr: usize,
-        len: usize,
-        fracs: Tracked<Fracs>,
-    }
-
-    impl<PM> LockedJournal<PM>
-        where
-            PM: PersistentMemoryRegion,
-    {
-        spec fn inv(self) -> bool {
-            &&& self.fracs@.read.valid(self.pmem.read_id())
-            &&& self.fracs@.durable.valid(self.pmem.durable_id())
-            &&& self.fracs@.read.off() == self.addr
-            &&& self.fracs@.durable.off() == self.addr
-            &&& self.fracs@.read@.len() == self.len
-            &&& self.fracs@.durable@.len() == self.len
-            &&& self.len >= 8
-        }
-
-        fn record(self, mut writeset: VecDeque<Write>)
-            requires
-                self.inv(),
-        {
-            let nwrites = writeset.len();
-
-/*
-            let next_addr = self.addr + 8;
-            for i in 0..nwrites {
-                let w = writeset.pop_front().unwrap();
-                self.pmem.write(next_addr, u64_to_le_bytes(w.addr as u64).as_slice(), self.fracs);
-                self.pmem.write(next_addr+8, u64_to_le_bytes(w.bytes.len() as u64).as_slice(), self.fracs);
-                self.pmem.write(next_addr+16, w.bytes, self.fracs);
-            }
-            */
-
-            self.pmem.write(self.addr, u64_to_le_bytes(nwrites as u64).as_slice(), self.fracs);
-        }
-    }
-
-    pub struct Commit<'a> {
+    pub struct Commit {
         pub committed_id: int,
-        pub writes: Seq<Write<'a>>,
+        pub writes: Seq<GWrite>,
     }
 
-    impl<'a> MutOperation for Commit<'a> {
+    impl MutOperation for Commit {
         type Resource = SeqAuth<u8>;
         type ExecResult = bool;
         type NewState = bool;
@@ -553,35 +526,10 @@ verus! {
         open spec fn ensures(self, r: Self::Resource, new_r: Self::Resource, new_state: Self::NewState) -> bool {
             if new_state {
                 &&& new_r.valid(self.committed_id)
+                &&& new_r@ == apply_writes(r@, self.writes)
             } else {
                 &&& new_r == r
             }
         }
     }
-
-    impl<PM> Journal<PM>
-        where
-            PM: PersistentMemoryRegion,
-    {
-        pub fn commit<'a, Lin>(&self, writes: &mut Vec<Write>, Tracked(lin): Tracked<Lin>) -> (result: (bool, Tracked<Lin::Completion>))
-            where
-                Lin: MutLinearizer<Commit<'a>>
-            requires
-                lin.pre(Commit{ committed_id: self.committed_id(), writes: old(writes)@ }),
-                !lin.namespaces().contains(self.namespace()),
-            ensures
-                lin.post(Commit{ committed_id: self.committed_id(), writes: old(writes)@ }, result.0, result.1@),
-        {
-            let ghost op = Commit{ committed_id: self.committed_id(), writes: writes@ };
-            let commit = false;
-            let tracked complete;
-            open_atomic_invariant!(&self.inv => inner => {
-                proof {
-                    complete = lin.apply(op, &mut inner.committed, commit, &commit);
-                }
-            });
-            (commit, Tracked(complete))
-        }
-    }
-    */
 }
