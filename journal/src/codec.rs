@@ -186,7 +186,6 @@ verus! {
 
     trait VecLoopDecode {}
 
-/*
     impl<T> Decodable for Vec<T>
         where
             T: Decodable + DeepView + VecLoopDecode,
@@ -195,19 +194,29 @@ verus! {
         exec fn decode(buf: &mut Vec<u8>, Ghost(oldv): Ghost<Self>) -> (result: Self)
         {
             broadcast use is_prefix_of_trans;
+            broadcast use is_prefix_of_skip;
 
             let len = usize::decode(buf, Ghost(oldv.len()));
             let mut result = Vec::<T>::new();
 
             assert(result.deep_view() == oldv.deep_view().take(0));
+            assert(oldv.deep_view().skip(0) == oldv.deep_view());
 
             for i in 0..len
                 invariant
-                    result.deep_view() == oldv.deep_view().take(i as int)
+                    len == oldv@.len(),
+                    result.deep_view() == oldv.deep_view().take(i as int),
+                    buf@ =~= old(buf)@.skip(oldv.len().encoding().len() as int +
+                                            oldv.deep_view().take(i as int).map(|i: int, v: <T as DeepView>::V| v.encoding()).flatten().len()),
+                    oldv.deep_view().skip(i as int).map(|i: int, v: <T as DeepView>::V| v.encoding()).flatten().is_prefix_of(buf@),
             {
-                let e = T::decode(buf, Ghost(oldv[i as int]));
+                // XXX
+                proof { admit(); }
+
+                let e = T::decode(buf, Ghost(oldv@[i as int]));
                 result.push(e);
-                assert(e.deep_view() == oldv.deep_view()[i as int]);
+                assert(e.deep_view() == oldv@[i as int].deep_view());
+                assert(oldv@[i as int].deep_view() == oldv.deep_view()[i as int]);
                 assert(result.deep_view() == oldv.deep_view().take(i as int).push(e.deep_view()));
                 assert(result.deep_view() == oldv.deep_view().take(i+1));
             }
@@ -215,7 +224,6 @@ verus! {
             result
         }
     }
-    */
 
     impl Decodable for Vec<u8> {
         exec fn decode(buf: &mut Vec<u8>, Ghost(oldv): Ghost<Self>) -> (result: Self)
