@@ -1,4 +1,3 @@
-use std::collections::VecDeque;
 use std::sync::Arc;
 
 use vstd::prelude::*;
@@ -89,8 +88,9 @@ verus! {
     pub struct JWrite<'a> {
         pub addr: usize,
         pub bytes: &'a [u8],
-        pub read_frac: Tracked<SeqFrac<u8>>,
     }
+
+    impl<'a> VecLoopEncode for JWrite<'a> {}
 
     impl<'a> DeepView for JWrite<'a> {
         type V = GWrite;
@@ -371,18 +371,21 @@ verus! {
             self.inv.namespace()
         }
 
-        exec fn install<'a>(&self, mut writes: VecDeque<JWrite<'a>>, Tracked(prefix): Tracked<GhostVar<Seq<GWrite>>>) -> (result: (Tracked<Seq<SeqFrac<u8>>>, Tracked<GhostVar<Seq<GWrite>>>))
+        exec fn install<'a>(&self, mut writes: Vec<JWrite<'a>>, Tracked(write_perms): Tracked<Seq<SeqFrac<u8>>>, Tracked(prefix): Tracked<GhostVar<Seq<GWrite>>>) -> (result: (Tracked<Seq<SeqFrac<u8>>>, Tracked<GhostVar<Seq<GWrite>>>))
             requires
                 self.inv(),
                 writes@.len() == prefix@.len(),
+                writes@.len() == write_perms.len(),
                 prefix.id() == self.pending_id(),
                 forall |i| 0 <= i < writes@.len() ==> {
                     &&& (#[trigger] writes@[i]).addr == prefix@[i].addr
                     &&& writes@[i].bytes@ == prefix@[i].data
                     &&& writes@[i].bytes@.len() > 0
-                    &&& writes@[i].read_frac@.valid(self.read_id())
-                    &&& writes@[i].read_frac@.off() == writes@[i].addr
-                    &&& writes@[i].read_frac@@.len() == writes@[i].bytes@.len()
+                },
+                forall |i| 0 <= i < writes@.len() ==> {
+                    &&& (#[trigger] write_perms[i]).valid(self.read_id())
+                    &&& write_perms[i].off() == writes@[i].addr
+                    &&& write_perms[i]@.len() == writes@[i].bytes@.len()
                 },
             ensures
                 result.0@.len() == writes@.len(),
@@ -390,42 +393,46 @@ verus! {
                 result.1@@.len() == 0,
                 forall |i| 0 <= i < result.0@.len() ==> {
                     &&& (#[trigger] result.0@[i]).valid(self.read_id())
-                    &&& result.0@[i].off() == writes@[i].read_frac@.off()
+                    &&& result.0@[i].off() == write_perms[i].off()
                     &&& result.0@[i]@ == writes@[i].bytes@
                 },
         {
             broadcast use vstd::std_specs::vecdeque::group_vec_dequeue_axioms;
             let nwrites = writes.len();
-            let mut old_writes = writes;
+            let tracked mut old_write_perms = write_perms;
             let tracked mut new_read_fracs = Seq::<SeqFrac<u8>>::tracked_empty();
             for i in 0..nwrites
                 invariant
                     writes@.len() == nwrites,
-                    old_writes@ =~= writes@.skip(i as int),
+                    writes@.len() == write_perms.len(),
+                    old_write_perms =~= write_perms.skip(i as int),
                     i == new_read_fracs.len(),
                     forall |j| 0 <= j < i ==> {
                         &&& (#[trigger] new_read_fracs[j]).valid(self.read_id())
-                        &&& new_read_fracs[j].off() == writes@[j].read_frac@.off()
+                        &&& new_read_fracs[j].off() == write_perms[j].off()
                         &&& new_read_fracs[j]@ == writes@[j].bytes@
                     },
                     forall |j| 0 <= j < writes@.len() ==> {
                         &&& (#[trigger] writes@[j]).addr == prefix@[j].addr
                         &&& writes@[j].bytes@ == prefix@[j].data
                         &&& writes@[j].bytes@.len() > 0
-                        &&& writes@[j].read_frac@.valid(self.read_id())
-                        &&& writes@[j].read_frac@.off() == writes@[j].addr
-                        &&& writes@[j].read_frac@@.len() == writes@[j].bytes@.len()
+                    },
+                    forall |j| 0 <= j < writes@.len() ==> {
+                        &&& (#[trigger] write_perms[j]).valid(self.read_id())
+                        &&& write_perms[j].off() == writes@[j].addr
+                        &&& write_perms[j]@.len() == writes@[j].bytes@.len()
                     },
                     self.pmem.durable_id() == self.inv.constant().durable_id,
                     prefix.id() == self.inv.constant().pending_id,
                     nwrites <= prefix@.len(),
             {
-                let w = old_writes.pop_front().unwrap();
+                let w = &writes[i];
+                let tracked w_perm = old_write_perms.tracked_pop_front();
                 let credit = create_open_invariant_credit();
                 let tracked iw = InstallationWrite{
                     credit: credit.get(),
                     inv: self.inv.clone(),
-                    read: w.read_frac.get(),
+                    read: w_perm,
                     prefix: &prefix,
                     prefixpos: i,
                 };
@@ -448,16 +455,19 @@ verus! {
             (Tracked(new_read_fracs), prefix)
         }
 
-        exec fn log<Lin, 'a>(&self, mut writes: VecDeque<JWrite<'a>>, Tracked(lin): Tracked<Lin>) -> (result: (Tracked<Seq<SeqFrac<u8>>>, Tracked<Lin::Completion>))
+        exec fn log<Lin, 'a>(&self, mut writes: Vec<JWrite<'a>>, Tracked(write_perms): Tracked<Seq<SeqFrac<u8>>>, Tracked(lin): Tracked<Lin>) -> (result: (Tracked<Seq<SeqFrac<u8>>>, Tracked<Lin::Completion>))
             where
                 Lin: MutLinearizer<Commit>,
             requires
                 self.inv(),
+                writes@.len() == write_perms.len(),
                 forall |i| 0 <= i < writes@.len() ==> {
                     &&& (#[trigger] writes@[i]).bytes@.len() > 0
-                    &&& writes@[i].read_frac@.valid(self.read_id())
-                    &&& writes@[i].read_frac@.off() == writes@[i].addr
-                    &&& writes@[i].read_frac@@.len() == writes@[i].bytes@.len()
+                },
+                forall |i| 0 <= i < writes@.len() ==> {
+                    &&& (#[trigger] write_perms[i]).valid(self.read_id())
+                    &&& write_perms[i].off() == writes@[i].addr
+                    &&& write_perms[i]@.len() == writes@[i].bytes@.len()
                 },
                 lin.pre(Commit{ committed_id: self.committed_id(), writes: writes.deep_view() }),
                 !lin.namespaces().contains(self.namespace()),
@@ -465,7 +475,7 @@ verus! {
                 result.0@.len() == writes@.len(),
                 forall |i| 0 <= i < result.0@.len() ==> {
                     &&& (#[trigger] result.0@[i]).valid(self.read_id())
-                    &&& result.0@[i].off() == writes@[i].read_frac@.off()
+                    &&& result.0@[i].off() == write_perms[i].off()
                     &&& result.0@[i]@ == writes@[i].bytes@
                 },
                 lin.post(Commit{ committed_id: self.committed_id(), writes: writes.deep_view() }, true, result.1@),
@@ -475,6 +485,9 @@ verus! {
                 committed_id: self.committed_id(),
                 writes: gwrites,
             };
+
+            let mut log_data = Vec::new();
+            writes.encode(&mut log_data);
 
             let (installer, handle) = self.installer.acquire_write();
             let tracked mut prefix = installer.prefix.get();
@@ -497,7 +510,7 @@ verus! {
 
             assert(forall |i: int| 0 <= i < writes@.len() ==> gwrites[i].data == (#[trigger] writes@[i]).bytes@);
 
-            let (Tracked(res), Tracked(prefix)) = self.install(writes, Tracked(prefix));
+            let (Tracked(res), Tracked(prefix)) = self.install(writes, Tracked(write_perms), Tracked(prefix));
             let installer = InstallerState{
                 prefix: Tracked(prefix),
             };

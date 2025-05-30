@@ -130,7 +130,7 @@ verus! {
         }
     }
 
-    trait VecLoopEncode {}
+    pub trait VecLoopEncode {}
 
     impl<T> Encodable for Vec<T>
         where
