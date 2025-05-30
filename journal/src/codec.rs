@@ -3,6 +3,7 @@ use vstd::bytes::*;
 
 verus! {
     pub trait Encoding : Sized {
+        open spec fn encodable(self) -> bool { true }
         spec fn encoding(self) -> Seq<u8>;
     }
 
@@ -13,7 +14,8 @@ verus! {
     {
         exec fn encode(&self, buf: &mut Vec<u8>)
             ensures
-                buf@ =~= old(buf)@ + self.deep_view().encoding();
+                buf@ =~= old(buf)@ + self.deep_view().encoding(),
+                self.deep_view().encodable();
     }
 
     pub trait Decodable
@@ -21,12 +23,13 @@ verus! {
             Self: Sized + DeepView,
             <Self as DeepView>::V: Encoding,
     {
-        exec fn decode(buf: &mut Vec<u8>, Ghost(oldv): Ghost<Self>) -> (result: Self)
+        exec fn decode(buf: &mut Vec<u8>, Ghost(oldview): Ghost<<Self as DeepView>::V>) -> (result: Self)
             requires
-                oldv.deep_view().encoding().is_prefix_of(old(buf)@),
+                oldview.encodable(),
+                oldview.encoding().is_prefix_of(old(buf)@),
             ensures
-                result.deep_view() =~= oldv.deep_view(),
-                buf@ =~= old(buf)@.skip(oldv.deep_view().encoding().len() as int);
+                result.deep_view() =~= oldview,
+                buf@ =~= old(buf)@.skip(oldview.encoding().len() as int);
     }
 
     pub trait Serializable
@@ -91,6 +94,10 @@ verus! {
         where
             T: Encoding,
     {
+        open spec fn encodable(self) -> bool {
+            self.len() as usize == self.len()
+        }
+
         open spec fn encoding(self) -> Seq<u8> {
             (self.len() as usize).encoding() + self.map(|i: int, v: T| v.encoding()).flatten()
         }
@@ -184,41 +191,40 @@ verus! {
             a.is_prefix_of(b.skip(n)) && #[trigger] b.is_prefix_of(c) ==> #[trigger] a.is_prefix_of(c.skip(n)),
     {}
 
-    trait VecLoopDecode {}
+    pub trait VecLoopDecode {}
 
     impl<T> Decodable for Vec<T>
         where
             T: Decodable + DeepView + VecLoopDecode,
             <T as DeepView>::V: Encoding,
     {
-        exec fn decode(buf: &mut Vec<u8>, Ghost(oldv): Ghost<Self>) -> (result: Self)
+        exec fn decode(buf: &mut Vec<u8>, Ghost(oldview): Ghost<<Self as DeepView>::V>) -> (result: Self)
         {
             broadcast use is_prefix_of_trans;
             broadcast use is_prefix_of_skip;
 
-            let len = usize::decode(buf, Ghost(oldv.len()));
+            let len = usize::decode(buf, Ghost(oldview.len() as usize));
             let mut result = Vec::<T>::new();
 
-            assert(result.deep_view() == oldv.deep_view().take(0));
-            assert(oldv.deep_view().skip(0) == oldv.deep_view());
+            assert(result.deep_view() == oldview.take(0));
+            assert(oldview.skip(0) == oldview);
 
             for i in 0..len
                 invariant
-                    len == oldv@.len(),
-                    result.deep_view() == oldv.deep_view().take(i as int),
-                    buf@ =~= old(buf)@.skip(oldv.len().encoding().len() as int +
-                                            oldv.deep_view().take(i as int).map(|i: int, v: <T as DeepView>::V| v.encoding()).flatten().len()),
-                    oldv.deep_view().skip(i as int).map(|i: int, v: <T as DeepView>::V| v.encoding()).flatten().is_prefix_of(buf@),
+                    len == oldview.len(),
+                    result.deep_view() == oldview.take(i as int),
+                    buf@ =~= old(buf)@.skip((oldview.len() as usize).encoding().len() as int +
+                                            oldview.take(i as int).map(|i: int, v: <T as DeepView>::V| v.encoding()).flatten().len()),
+                    oldview.skip(i as int).map(|i: int, v: <T as DeepView>::V| v.encoding()).flatten().is_prefix_of(buf@),
             {
                 // XXX
                 proof { admit(); }
 
-                let e = T::decode(buf, Ghost(oldv@[i as int]));
+                let e = T::decode(buf, Ghost(oldview[i as int]));
                 result.push(e);
-                assert(e.deep_view() == oldv@[i as int].deep_view());
-                assert(oldv@[i as int].deep_view() == oldv.deep_view()[i as int]);
-                assert(result.deep_view() == oldv.deep_view().take(i as int).push(e.deep_view()));
-                assert(result.deep_view() == oldv.deep_view().take(i+1));
+                assert(e.deep_view() == oldview[i as int]);
+                assert(result.deep_view() == oldview.take(i as int).push(e.deep_view()));
+                assert(result.deep_view() == oldview.take(i+1));
             }
 
             result
@@ -226,14 +232,14 @@ verus! {
     }
 
     impl Decodable for Vec<u8> {
-        exec fn decode(buf: &mut Vec<u8>, Ghost(oldv): Ghost<Self>) -> (result: Self)
+        exec fn decode(buf: &mut Vec<u8>, Ghost(oldview): Ghost<<Self as DeepView>::V>) -> (result: Self)
         {
             broadcast use is_prefix_of_trans;
             broadcast use seq_u8_encoding_simplify;
 
-            let len = usize::decode(buf, Ghost(oldv.len()));
+            let len = usize::decode(buf, Ghost(oldview.len() as usize));
 
-            assert(oldv.deep_view().is_prefix_of(oldv.deep_view().encoding().skip(oldv.len().deep_view().encoding().len() as int)));
+            assert(oldview.is_prefix_of(oldview.encoding().skip((oldview.len() as usize).encoding().len() as int)));
             let mut venc = buf.split_off(len);
             std::mem::swap(buf, &mut venc);
 

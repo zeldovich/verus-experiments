@@ -104,6 +104,10 @@ verus! {
     }
 
     impl Encoding for GWrite {
+        open spec fn encodable(self) -> bool {
+            self.data.len() as usize == self.data.len()
+        }
+
         closed spec fn encoding(self) -> Seq<u8> {
             self.addr.encoding() + self.data.encoding()
         }
@@ -139,14 +143,16 @@ verus! {
         }
     }
 
+    impl VecLoopDecode for JWriteVec {}
+
     impl Decodable for JWriteVec {
-        exec fn decode(buf: &mut Vec<u8>, Ghost(oldv): Ghost<Self>) -> (result: Self)
+        exec fn decode(buf: &mut Vec<u8>, Ghost(oldview): Ghost<<Self as DeepView>::V>) -> (result: Self)
         {
             broadcast use is_prefix_of_trans;
             broadcast use is_prefix_of_skip;
 
-            let addr = usize::decode(buf, Ghost(oldv.addr));
-            let bytes = Vec::decode(buf, Ghost(oldv.bytes));
+            let addr = usize::decode(buf, Ghost(oldview.addr));
+            let bytes = Vec::decode(buf, Ghost(oldview.data));
 
             Self{
                 addr: addr,
@@ -486,8 +492,12 @@ verus! {
                 writes: gwrites,
             };
 
+            // XXX experiment with encoding/decoding
             let mut log_data = Vec::new();
             writes.encode(&mut log_data);
+
+            let writes2 = Vec::<JWriteVec>::decode(&mut log_data, Ghost(writes.deep_view()));
+            assert(writes.deep_view() == writes2.deep_view());
 
             let (installer, handle) = self.installer.acquire_write();
             let tracked mut prefix = installer.prefix.get();
