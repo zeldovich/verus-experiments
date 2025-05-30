@@ -95,7 +95,8 @@ verus! {
             T: Encoding,
     {
         open spec fn encodable(self) -> bool {
-            self.len() as usize == self.len()
+            &&& self.len() as usize == self.len()
+            &&& forall |i| 0 <= i < self.len() ==> (#[trigger] self[i]).encodable()
         }
 
         open spec fn encoding(self) -> Seq<u8> {
@@ -149,7 +150,8 @@ verus! {
             self.len().encode(buf);
             for i in 0..self.len()
                 invariant
-                    buf@ =~= old(buf)@ + (self.deep_view().len() as usize).encoding() + self.deep_view().take(i as int).map(|i: int, v: <T as DeepView>::V| v.encoding()).flatten()
+                    buf@ =~= old(buf)@ + (self.deep_view().len() as usize).encoding() + self.deep_view().take(i as int).map(|i: int, v: <T as DeepView>::V| v.encoding()).flatten(),
+                    forall |j: int| 0 <= j < i ==> (#[trigger] self.deep_view()[j as int]).encodable(),
             {
                 self[i].encode(buf);
                 proof {
@@ -216,6 +218,7 @@ verus! {
                     buf@ =~= old(buf)@.skip((oldview.len() as usize).encoding().len() as int +
                                             oldview.take(i as int).map(|i: int, v: <T as DeepView>::V| v.encoding()).flatten().len()),
                     oldview.skip(i as int).map(|i: int, v: <T as DeepView>::V| v.encoding()).flatten().is_prefix_of(buf@),
+                    oldview.encodable(),
             {
                 // XXX
                 proof { admit(); }
