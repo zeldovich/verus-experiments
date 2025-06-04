@@ -21,7 +21,7 @@ verus! {
         pub data: Seq<u8>,
     }
 
-    pub struct CrashInvState {
+    pub struct InstallerInvState {
         // Client view of pmem's durable resource.
         durable: GhostVar<Seq<u8>>,
 
@@ -34,10 +34,24 @@ verus! {
         pending: GhostVarAuth<Seq<GWrite>>,
     }
 
-    pub struct CrashInvPred {
+    pub struct InstallerInvPred {
         durable_id: int,
         committed_id: int,
         pending_id: int,
+    }
+
+    pub struct LoggerInvState {
+        // Client view of pmem's durable resource.
+        // XXX needs to be a SeqView to be compatible with InstallerInvState::durable.
+        durable: GhostVar<Seq<u8>>,
+
+        // Committed writes that are logged to the journal.
+        logged: GhostVarAuth<Seq<GWrite>>,
+    }
+
+    pub struct LoggerInvPred {
+        durable_id: int,
+        logged_id: int,
     }
 
     pub open spec fn apply_write(state: Seq<u8>, write: GWrite) -> Seq<u8> {
@@ -75,13 +89,24 @@ verus! {
         }
     }
 
-    impl InvariantPredicate<CrashInvPred, CrashInvState> for CrashInvPred
+    impl InvariantPredicate<InstallerInvPred, InstallerInvState> for InstallerInvPred
     {
-        closed spec fn inv(k: CrashInvPred, inner: CrashInvState) -> bool {
+        closed spec fn inv(k: InstallerInvPred, inner: InstallerInvState) -> bool {
             &&& inner.durable.id() == k.durable_id
             &&& inner.committed.valid(k.committed_id)
             &&& inner.pending.id() == k.pending_id
             &&& inner.committed@ == apply_writes(inner.durable@, inner.pending@)
+        }
+    }
+
+    impl InvariantPredicate<LoggerInvPred, LoggerInvState> for LoggerInvPred
+    {
+        closed spec fn inv(k: LoggerInvPred, inner: LoggerInvState) -> bool {
+            &&& inner.durable.id() == k.durable_id
+            &&& inner.logged.id() == k.logged_id
+
+            // XXX need a header flag
+            &&& inner.logged@.encoding().is_prefix_of(inner.durable@)
         }
     }
 
@@ -163,7 +188,7 @@ verus! {
 
     struct InstallationWrite<'a> {
         credit: OpenInvariantCredit,
-        inv: Arc<AtomicInvariant<CrashInvPred, CrashInvState, CrashInvPred>>,
+        inv: Arc<AtomicInvariant<InstallerInvPred, InstallerInvState, InstallerInvPred>>,
         read: SeqFrac<u8>,
         prefix: &'a GhostVar<Seq<GWrite>>,
         prefixpos: usize,
@@ -242,7 +267,7 @@ verus! {
 
     struct InstallationFlush<'a> {
         credit: OpenInvariantCredit,
-        inv: Arc<AtomicInvariant<CrashInvPred, CrashInvState, CrashInvPred>>,
+        inv: Arc<AtomicInvariant<InstallerInvPred, InstallerInvState, InstallerInvPred>>,
         prefix: GhostVar<Seq<GWrite>>,
         readfracs: &'a Seq<SeqFrac<u8>>,
     }
@@ -344,7 +369,7 @@ verus! {
             PM: PersistentMemoryRegion,
     {
         pmem: Arc<PM>,
-        inv: Arc<AtomicInvariant<CrashInvPred, CrashInvState, CrashInvPred>>,
+        installer_inv: Arc<AtomicInvariant<InstallerInvPred, InstallerInvState, InstallerInvPred>>,
         installer: RwLock<InstallerState, InstallerPred>,
     }
 
@@ -361,20 +386,20 @@ verus! {
         }
 
         pub closed spec fn committed_id(self) -> int {
-            self.inv.constant().committed_id
+            self.installer_inv.constant().committed_id
         }
 
         pub closed spec fn inv(self) -> bool {
-            &&& self.inv.constant().durable_id == self.pmem.durable_id()
-            &&& self.inv.constant().pending_id == self.installer.pred().pending_id
+            &&& self.installer_inv.constant().durable_id == self.pmem.durable_id()
+            &&& self.installer_inv.constant().pending_id == self.installer.pred().pending_id
         }
 
         spec fn pending_id(self) -> int {
-            self.inv.constant().pending_id
+            self.installer_inv.constant().pending_id
         }
 
         pub closed spec fn namespace(self) -> int {
-            self.inv.namespace()
+            self.installer_inv.namespace()
         }
 
         exec fn install<'a>(&self, mut writes: Vec<JWrite<'a>>, Tracked(write_perms): Tracked<Seq<SeqFrac<u8>>>, Tracked(prefix): Tracked<GhostVar<Seq<GWrite>>>) -> (result: (Tracked<Seq<SeqFrac<u8>>>, Tracked<GhostVar<Seq<GWrite>>>))
@@ -428,8 +453,8 @@ verus! {
                         &&& write_perms[j].off() == writes@[j].addr
                         &&& write_perms[j]@.len() == writes@[j].bytes@.len()
                     },
-                    self.pmem.durable_id() == self.inv.constant().durable_id,
-                    prefix.id() == self.inv.constant().pending_id,
+                    self.pmem.durable_id() == self.installer_inv.constant().durable_id,
+                    prefix.id() == self.installer_inv.constant().pending_id,
                     nwrites <= prefix@.len(),
             {
                 let w = &writes[i];
@@ -437,7 +462,7 @@ verus! {
                 let credit = create_open_invariant_credit();
                 let tracked iw = InstallationWrite{
                     credit: credit.get(),
-                    inv: self.inv.clone(),
+                    inv: self.installer_inv.clone(),
                     read: w_perm,
                     prefix: &prefix,
                     prefixpos: i,
@@ -451,7 +476,7 @@ verus! {
             let credit = create_open_invariant_credit();
             let tracked ifl = InstallationFlush{
                 credit: credit.get(),
-                inv: self.inv.clone(),
+                inv: self.installer_inv.clone(),
                 prefix: prefix,
                 readfracs: &new_read_fracs,
             };
@@ -502,7 +527,7 @@ verus! {
             let (installer, handle) = self.installer.acquire_write();
             let tracked mut prefix = installer.prefix.get();
             let tracked mut complete;
-            open_atomic_invariant!(&self.inv => inner => {
+            open_atomic_invariant!(&self.installer_inv => inner => {
                 proof {
                     complete = lin.apply(op, &mut inner.committed, true, &true);
 
@@ -514,7 +539,7 @@ verus! {
                     assert(inner.pending@.take(pending0.len() as int) == pending0);
                     assert(inner.pending@.skip(pending0.len() as int) == gwrites);
 
-                    assert(CrashInvPred::inv(self.inv.constant(), inner));
+                    assert(InstallerInvPred::inv(self.installer_inv.constant(), inner));
                 }
             });
 
