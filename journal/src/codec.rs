@@ -217,17 +217,28 @@ verus! {
                     result.deep_view() == oldview.take(i as int),
                     buf@ =~= old(buf)@.skip((oldview.len() as usize).encoding().len() as int +
                                             oldview.take(i as int).map(|i: int, v: <T as DeepView>::V| v.encoding()).flatten().len()),
+                    (oldview.len() as usize).encoding().len() as int + oldview.take(i as int).map(|i: int, v: <T as DeepView>::V| v.encoding()).flatten().len() <= old(buf)@.len(),
                     oldview.skip(i as int).map(|i: int, v: <T as DeepView>::V| v.encoding()).flatten().is_prefix_of(buf@),
                     oldview.encodable(),
             {
-                // XXX
-                proof { admit(); }
+                assert(oldview[i as int].encoding().is_prefix_of(oldview.skip(i as int).map(|i: int, v: <T as DeepView>::V| v.encoding()).flatten()));
 
                 let e = T::decode(buf, Ghost(oldview[i as int]));
                 result.push(e);
-                assert(e.deep_view() == oldview[i as int]);
                 assert(result.deep_view() == oldview.take(i as int).push(e.deep_view()));
                 assert(result.deep_view() == oldview.take(i+1));
+
+                let ghost rem_encoding = oldview.skip(i+1).map(|i: int, v: <T as DeepView>::V| v.encoding()).flatten();
+
+                assert(oldview.skip(i as int).map(|i: int, v: <T as DeepView>::V| v.encoding()).drop_first() == oldview.skip(i+1).map(|i: int, v: <T as DeepView>::V| v.encoding()));
+                assert(rem_encoding =~= (oldview[i as int].encoding() + rem_encoding).subrange(oldview[i as int].encoding().len() as int, (oldview[i as int].encoding() + rem_encoding).len() as int));
+
+                proof {
+                    oldview.take(i+1).map(|i: int, v: <T as DeepView>::V| v.encoding()).lemma_flatten_and_flatten_alt_are_equivalent();
+                    oldview.take(i as int).map(|i: int, v: <T as DeepView>::V| v.encoding()).lemma_flatten_and_flatten_alt_are_equivalent();
+                }
+                assert(oldview.take(i+1).map(|i: int, v: <T as DeepView>::V| v.encoding()).drop_last() ==
+                       oldview.take(i as int).map(|i: int, v: <T as DeepView>::V| v.encoding()));
             }
 
             result
