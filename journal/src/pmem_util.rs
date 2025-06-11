@@ -30,7 +30,7 @@ verus! {
 
             &&& r.read.off() == self.read.off()
 
-            &&& r.read@ == self.read@.update_range(op.addr - self.read.off(), op.data)
+            &&& r.read@ == self.read@.update_subrange_with(op.addr - self.read.off(), op.data)
             &&& can_result_from_write(r.durable@, self.durable@, op.addr as int, op.data)
         }
 
@@ -40,8 +40,8 @@ verus! {
             mself.read.agree(&r.read);
             r.durable.agree(&mself.durable);
 
-            mself.read.update_range(&mut r.read, op.addr as int - mself.read.off(), op.data);
-            r.durable.update(&mut mself.durable, r.durable@.update_range(op.addr as int, new_state));
+            mself.read.update_subrange_with(&mut r.read, op.addr as int - mself.read.off(), op.data);
+            r.durable.update(&mut mself.durable, r.durable@.update_subrange_with(op.addr as int, new_state));
 
             mself
         }

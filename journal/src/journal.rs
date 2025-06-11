@@ -55,7 +55,7 @@ verus! {
     }
 
     pub open spec fn apply_write(state: Seq<u8>, write: GWrite) -> Seq<u8> {
-        state.update_range(write.addr as int, write.data)
+        state.update_subrange_with(write.addr as int, write.data)
     }
 
     pub open spec fn apply_writes(state: Seq<u8>, writes: Seq<GWrite>) -> Seq<u8> {
@@ -200,9 +200,9 @@ verus! {
             pending[pos].data.len() == data.len(),
             0 <= pos < pending.len(),
         ensures
-            apply_writes(durable, pending) == apply_writes(durable.update_range(addr, data), pending)
+            apply_writes(durable, pending) == apply_writes(durable.update_subrange_with(addr, data), pending)
     {
-        let durableU = durable.update_range(addr, data);
+        let durableU = durable.update_subrange_with(addr, data);
         let pending0 = pending.take(pos);
         let dpos  = apply_writes(durable,  pending0);
         let dposU = apply_writes(durableU, pending0);
@@ -253,7 +253,7 @@ verus! {
             open_atomic_invariant_in_proof!(mself.credit => &mself.inv => inner => {
                 inner.pending.agree(mself.prefix);
                 installation_write_idempotent(r.durable@, inner.pending@, op.addr as int, new_state, mself.prefixpos as int);
-                r.durable.update(&mut inner.durable, r.durable@.update_range(op.addr as int, new_state));
+                r.durable.update(&mut inner.durable, r.durable@.update_subrange_with(op.addr as int, new_state));
             });
 
             assert(op.ensures(*old(r), *r, new_state));

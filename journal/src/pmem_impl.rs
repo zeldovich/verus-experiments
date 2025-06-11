@@ -133,18 +133,18 @@ verus! {
             }
 
             proof { vstd::std_specs::vec::axiom_spec_len(&state.data); }
-            assert(state.data@ == state.r@.read@.update_range(addr as int, bytes@.subrange(0, 0)));
+            assert(state.data@ == state.r@.read@.update_subrange_with(addr as int, bytes@.subrange(0, 0)));
             for i in 0..bytes.len()
                 invariant
                     addr + bytes@.len() <= state.data@.len(),
                     state.data@.len() <= usize::MAX,
-                    state.data@ == state.r@.read@.update_range(addr as int, bytes@.subrange(0, i as int)),
+                    state.data@ == state.r@.read@.update_subrange_with(addr as int, bytes@.subrange(0, i as int)),
                     state.r@.read.valid(op.read_id),
                     state.r@.durable.id() == op.durable_id,
                     state.r@.read@ == state.r@.durable@,
             {
                 state.data[addr+i] = bytes[i];
-                assert(state.data@ == state.r@.read@.update_range(addr as int, bytes@.subrange(0, i+1 as int)));
+                assert(state.data@ == state.r@.read@.update_subrange_with(addr as int, bytes@.subrange(0, i+1 as int)));
             }
 
             let tracked complete;

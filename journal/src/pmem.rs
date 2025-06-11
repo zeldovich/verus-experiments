@@ -64,8 +64,8 @@ verus! {
         open spec fn ensures(self, r: Self::Resource, new_r: Self::Resource, new_state: Self::NewState) -> bool {
             &&& new_r.read.valid(self.read_id)
             &&& new_r.durable.id() == self.durable_id
-            &&& new_r.read@ == r.read@.update_range(self.addr as int, self.data)
-            &&& new_r.durable@ == r.durable@.update_range(self.addr as int, new_state)
+            &&& new_r.read@ == r.read@.update_subrange_with(self.addr as int, self.data)
+            &&& new_r.durable@ == r.durable@.update_subrange_with(self.addr as int, new_state)
         }
 
         open spec fn peek_requires(self, r: Self::Resource) -> bool {
