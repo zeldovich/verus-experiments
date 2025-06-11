@@ -48,8 +48,8 @@ verus! {
         open spec fn ensures(self, pre: Self::Resource, post: Self::Resource, new_state: Self::NewState) -> bool {
             &&& post.latest.valid(self.id)
             &&& post.persist.valid(self.persist_id)
-            &&& post.latest@ =~= pre.latest@.update_range(self.addr as int, self.data)
-            &&& post.persist@ =~= pre.persist@.update_range(self.addr as int, new_state.persist_data)
+            &&& post.latest@ =~= pre.latest@.update_subrange_with(self.addr as int, self.data)
+            &&& post.persist@ =~= pre.persist@.update_subrange_with(self.addr as int, new_state.persist_data)
         }
 
         open spec fn peek_requires(self, r: Self::Resource) -> bool {

@@ -109,7 +109,7 @@ verus! {
                 v@.len() > 0 ==> a + v@.len() <= old(self)@.len(),
             ensures
                 self.inv(),
-                self@ == old(self)@.update_range(a as int, v@),
+                self@ == old(self)@.update_subrange_with(a as int, v@),
                 can_result_from_write(self.persist(), old(self).persist(), a as int, v@),
         {
             self.store.splice(a..a+v.len(), v.iter().cloned());

@@ -65,7 +65,7 @@ verus! {
         open spec fn post(self, op: WriteOp, r: (), ar: Self::Completion) -> bool {
             &&& ar.0.valid(op.id)
             &&& ar.0.off() == self.latest_frac.off()
-            &&& ar.0@ == self.latest_frac@.update_range(op.addr - self.latest_frac.off(), op.data)
+            &&& ar.0@ == self.latest_frac@.update_subrange_with(op.addr - self.latest_frac.off(), op.data)
 
             &&& ar.1.valid(op.persist_id)
             &&& ar.1.off() == self.persist_frac.off()
@@ -77,8 +77,8 @@ verus! {
             mself.latest_frac.agree(&r.latest);
             mself.persist_frac.agree(&r.persist);
 
-            mself.latest_frac.update_range(&mut r.latest, op.addr - self.latest_frac.off(), op.data);
-            mself.persist_frac.update_range(&mut r.persist, op.addr - self.persist_frac.off(), new_state.persist_data);
+            mself.latest_frac.update_subrange_with(&mut r.latest, op.addr - self.latest_frac.off(), op.data);
+            mself.persist_frac.update_subrange_with(&mut r.persist, op.addr - self.persist_frac.off(), new_state.persist_data);
 
             (mself.latest_frac, mself.persist_frac)
         }

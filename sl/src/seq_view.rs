@@ -57,6 +57,19 @@ verus! {
             };
             (auth, frac)
         }
+
+        pub proof fn agree(tracked self: &SeqAuth<V>, tracked frac: &SeqFrac<V>)
+            requires
+                self.valid(frac.id()),
+                frac.inv(),
+            ensures
+                frac@.len() > 0 ==> {
+                    &&& frac@ =~= self@.subrange(frac.off() as int, frac.off() + frac@.len() as int)
+                    &&& frac.off() + frac@.len() <= self@.len()
+                }
+        {
+            frac.agree(self)
+        }
     }
 
     impl<V> SeqFrac<V> {
@@ -136,7 +149,7 @@ verus! {
                 auth.inv(),
                 auth.id() == old(auth).id(),
                 self@ =~= v,
-                auth@ =~= old(auth)@.update_range(self.off() as int, v),
+                auth@ =~= old(auth)@.update_subrange_with(self.off() as int, v),
         {
             self.update_map(&mut auth.auth, v);
         }
@@ -161,7 +174,7 @@ verus! {
             self.frac.update(auth, vmap);
         }
 
-        pub proof fn update_range(tracked self: &mut SeqFrac<V>, tracked auth: &mut SeqAuth<V>, off: int, v: Seq<V>)
+        pub proof fn update_subrange_with(tracked self: &mut SeqFrac<V>, tracked auth: &mut SeqAuth<V>, off: int, v: Seq<V>)
             requires
                 old(self).valid(old(auth).id()),
                 old(auth).inv(),
@@ -172,8 +185,8 @@ verus! {
                 self.off() == old(self).off(),
                 auth.inv(),
                 auth.id() == old(auth).id(),
-                self@ =~= old(self)@.update_range(off, v),
-                auth@ =~= old(auth)@.update_range(self.off() + off, v),
+                self@ =~= old(self)@.update_subrange_with(off, v),
+                auth@ =~= old(auth)@.update_subrange_with(self.off() + off, v),
         {
             let tracked mut mid = self.split(off);
             let tracked mut end = mid.split(v.len() as int);
