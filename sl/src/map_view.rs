@@ -28,7 +28,7 @@ verus! {
 
         closed spec fn op(self, other: Self) -> Self {
             MapView {
-                auth: if self.auth.is_Some() { if other.auth.is_Some() { Some(None) } else { self.auth } } else { other.auth },
+                auth: if self.auth is Some { if other.auth is Some { Some(None) } else { self.auth } } else { other.auth },
                 frac: match self.frac {
                     None => None,
                     Some(sfr) => match other.frac {
@@ -102,8 +102,8 @@ verus! {
     impl<K, V> MapAuth<K, V> {
         pub closed spec fn inv(self) -> bool
         {
-            &&& self.r.value().auth.is_Some()
-            &&& self.r.value().auth.unwrap().is_Some()
+            &&& self.r.value().auth is Some
+            &&& self.r.value().auth.unwrap() is Some
             &&& self.r.value().frac == Some(Map::<K, V>::empty())
         }
 
@@ -251,8 +251,8 @@ verus! {
     impl<K, V> MapFrac<K, V> {
         pub closed spec fn inv(self) -> bool
         {
-            &&& self.r.value().auth.is_None()
-            &&& self.r.value().frac.is_Some()
+            &&& self.r.value().auth is None
+            &&& self.r.value().frac is Some
         }
 
         pub closed spec fn id(self) -> Loc
