@@ -20,11 +20,13 @@ verus! {
 
         open spec fn requires(self, r: Self::Resource, e: Self::ExecResult) -> bool {
             &&& r.valid(self.read_id)
+            &&& r.off() == 0
             &&& e@ == r@.subrange(self.addr as int, self.addr as int + self.num_bytes as int)
         }
 
         open spec fn peek_requires(self, r: Self::Resource) -> bool {
             &&& r.valid(self.read_id)
+            &&& r.off() == 0
         }
 
         open spec fn peek_ensures(self, r: Self::Resource) -> bool {
@@ -58,6 +60,8 @@ verus! {
             &&& r.durable.valid(self.durable_id)
             &&& can_result_from_write(new_state, r.durable@.subrange(self.addr as int, self.addr as int + self.data.len()), 0, self.data)
             &&& r.read@.len() == r.durable@.len()
+            &&& r.read.off() == 0
+            &&& r.durable.off() == 0
         }
 
         open spec fn ensures(self, r: Self::Resource, new_r: Self::Resource, new_state: Self::NewState) -> bool {
@@ -65,11 +69,15 @@ verus! {
             &&& new_r.durable.valid(self.durable_id)
             &&& new_r.read@ == r.read@.update_subrange_with(self.addr as int, self.data)
             &&& new_r.durable@ == r.durable@.update_subrange_with(self.addr as int, new_state)
+            &&& new_r.read.off() == 0
+            &&& new_r.durable.off() == 0
         }
 
         open spec fn peek_requires(self, r: Self::Resource) -> bool {
             &&& r.read.valid(self.read_id)
             &&& r.durable.valid(self.durable_id)
+            &&& r.read.off() == 0
+            &&& r.durable.off() == 0
         }
 
         open spec fn peek_ensures(self, r: Self::Resource) -> bool {
@@ -90,6 +98,8 @@ verus! {
             &&& r.read.valid(self.read_id)
             &&& r.durable.valid(self.durable_id)
             &&& r.read@ == r.durable@
+            &&& r.read.off() == 0
+            &&& r.durable.off() == 0
         }
     }
 

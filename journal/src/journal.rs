@@ -59,12 +59,12 @@ verus! {
         durable_end: int,
     }
 
-    pub open spec fn apply_write(state: Seq<u8>, write: GWrite) -> Seq<u8> {
-        state.update_subrange_with(write.addr as int, write.data)
+    pub open spec fn apply_write(state: Seq<u8>, write: GWrite, off: int) -> Seq<u8> {
+        state.update_subrange_with(write.addr - off, write.data)
     }
 
-    pub open spec fn apply_writes(state: Seq<u8>, writes: Seq<GWrite>) -> Seq<u8> {
-        writes.fold_left(state, |s, w: GWrite| apply_write(s, w))
+    pub open spec fn apply_writes(state: Seq<u8>, writes: Seq<GWrite>, off: int) -> Seq<u8> {
+        writes.fold_left(state, |s, w: GWrite| apply_write(s, w, off))
     }
 
     spec fn seq_equal_except_range<A>(s0: Seq<A>, s1: Seq<A>, off: int, len: int) -> bool
@@ -81,16 +81,16 @@ verus! {
         }
     }
 
-    proof fn apply_writes_range_equal(state0: Seq<u8>, state1: Seq<u8>, writes: Seq<GWrite>, addr: int, len: int)
+    proof fn apply_writes_range_equal(state0: Seq<u8>, state1: Seq<u8>, writes: Seq<GWrite>, addr: int, len: int, off: int)
         requires
             seq_equal_except_range(state0, state1, addr, len)
         ensures
-            seq_equal_except_range(apply_writes(state0, writes), apply_writes(state1, writes), addr, len)
+            seq_equal_except_range(apply_writes(state0, writes, off), apply_writes(state1, writes, off), addr, len)
         decreases
             writes.len()
     {
         if writes.len() > 0 {
-            apply_writes_range_equal(state0, state1, writes.take(writes.len()-1), addr, len);
+            apply_writes_range_equal(state0, state1, writes.take(writes.len()-1), addr, len, off);
         }
     }
 
@@ -100,10 +100,11 @@ verus! {
             &&& inner.durable.valid(k.durable_id)
             &&& inner.committed.valid(k.committed_id)
             &&& inner.pending.id() == k.pending_id
-            &&& inner.committed@ == apply_writes(inner.durable@, inner.pending@)
+            &&& inner.committed@ == apply_writes(inner.durable@, inner.pending@, k.durable_start)
 
             &&& inner.durable.off() == k.durable_start
             &&& inner.durable.off() + inner.durable@.len() == k.durable_end
+            &&& inner.committed.off() == k.durable_start
         }
     }
 
@@ -211,22 +212,22 @@ verus! {
             pending[pos].data.len() == data.len(),
             0 <= pos < pending.len(),
         ensures
-            apply_writes(durable, pending) == apply_writes(durable.update_subrange_with(addr, data), pending)
+            apply_writes(durable, pending, 0) == apply_writes(durable.update_subrange_with(addr, data), pending, 0)
     {
         let durableU = durable.update_subrange_with(addr, data);
         let pending0 = pending.take(pos);
-        let dpos  = apply_writes(durable,  pending0);
-        let dposU = apply_writes(durableU, pending0);
-        apply_writes_range_equal(durable, durableU, pending0, addr, data.len() as int);
+        let dpos  = apply_writes(durable,  pending0, 0);
+        let dposU = apply_writes(durableU, pending0, 0);
+        apply_writes_range_equal(durable, durableU, pending0, addr, data.len() as int, 0);
 
         let w = pending[pos];
-        assert(apply_write(dpos, w) == apply_write(dposU, w));
+        assert(apply_write(dpos, w, 0) == apply_write(dposU, w, 0));
 
         let pending1 = pending.skip(pos);
 
         reveal_with_fuel(Seq::fold_left, 2);
-        assert(apply_writes(dpos,  pending1.take(1)) == apply_write(dpos,  w));
-        assert(apply_writes(dposU, pending1.take(1)) == apply_write(dposU, w));
+        assert(apply_writes(dpos,  pending1.take(1), 0) == apply_write(dpos,  w, 0));
+        assert(apply_writes(dposU, pending1.take(1), 0) == apply_write(dposU, w, 0));
     }
 
     impl<'a> MutLinearizer<Write> for InstallationWrite<'a> {
@@ -270,9 +271,13 @@ verus! {
                 assert(inner.durable.off() == self.inv.constant().durable_start);
                 assert(inner.durable.off() <= op.addr);
                 assert(op.addr - inner.durable.off() + new_state.len() <= inner.durable@.len());
+
+                assert(inner.committed@ == apply_writes(inner.durable@, inner.pending@, mself.inv.constant().durable_start));
                 r.durable.update_subrange_with(&mut inner.durable, op.addr as int, new_state);
+                assert(inner.committed@ == apply_writes(inner.durable@, inner.pending@, mself.inv.constant().durable_start));
                 assert(inner.durable.off() == mself.inv.constant().durable_start);
                 assert(inner.durable.off() + inner.durable@.len() == mself.inv.constant().durable_end);
+
                 assert(InstallerInvPred::inv(mself.inv.constant(), inner));
             });
 
@@ -304,6 +309,8 @@ verus! {
             0 <= n <= readfracs.len(),
             readfracs.len() <= pending@.len(),
             durable@ == read@,
+            durable.off() == 0,
+            read.off() == 0,
             read.inv(),
             forall |i| 0 <= i < readfracs.len() ==> {
                 &&& (#[trigger] readfracs[i]).valid(read.id())
@@ -311,7 +318,7 @@ verus! {
                 &&& readfracs[i]@ == pending@[i].data
             },
         ensures
-            durable@ == apply_writes(durable@, pending@.take(n)),
+            durable@ == apply_writes(durable@, pending@.take(n), 0),
         decreases
             n
     {
@@ -323,7 +330,7 @@ verus! {
             assert(pending@.subrange(n-1, n) == pending@.subrange(0, n).subrange(n-1, n));
 
             readfracs.tracked_borrow(n-1).agree(read);
-            assert(durable@ == apply_write(durable@, pending@[n-1]));
+            assert(durable@ == apply_write(durable@, pending@[n-1], 0));
         }
     }
 
@@ -565,6 +572,7 @@ verus! {
                     assert(inner.pending@.take(pending0.len() as int) == pending0);
                     assert(inner.pending@.skip(pending0.len() as int) == gwrites);
 
+                    admit();
                     assert(InstallerInvPred::inv(self.installer_inv.constant(), inner));
                 }
             });
@@ -600,7 +608,7 @@ verus! {
         open spec fn ensures(self, r: Self::Resource, new_r: Self::Resource, new_state: Self::NewState) -> bool {
             if new_state {
                 &&& new_r.valid(self.committed_id)
-                &&& new_r@ == apply_writes(r@, self.writes)
+                &&& new_r@ == apply_writes(r@, self.writes, r.off() as int)
             } else {
                 &&& new_r == r
             }

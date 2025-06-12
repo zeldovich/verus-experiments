@@ -27,6 +27,8 @@ verus! {
             &&& v.r@.durable.valid(self.durable_id)
             &&& v.data@ == v.r@.read@
             &&& v.data@ == v.r@.durable@
+            &&& v.r@.read.off() == 0
+            &&& v.r@.durable.off() == 0
         }
     }
 
@@ -46,8 +48,8 @@ verus! {
         {
             let mut data = Vec::new();
             data.resize(sz, 0);
-            let tracked (read, read_frac) = SeqAuth::new(data@);
-            let tracked (durable, durable_frac) = SeqAuth::new(data@);
+            let tracked (read, read_frac) = SeqAuth::new(data@, 0);
+            let tracked (durable, durable_frac) = SeqAuth::new(data@, 0);
             let locked = LockedState{
                 data: data,
                 r: Tracked(PMResource{
@@ -142,6 +144,8 @@ verus! {
                     state.r@.read.valid(op.read_id),
                     state.r@.durable.valid(op.durable_id),
                     state.r@.read@ == state.r@.durable@,
+                    state.r@.read.off() == 0,
+                    state.r@.durable.off() == 0,
             {
                 state.data[addr+i] = bytes[i];
                 assert(state.data@ == state.r@.read@.update_subrange_with(addr as int, bytes@.subrange(0, i+1 as int)));
