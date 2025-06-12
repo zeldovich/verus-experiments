@@ -77,8 +77,8 @@ verus! {
             mself.latest_frac.agree(&r.latest);
             mself.persist_frac.agree(&r.persist);
 
-            mself.latest_frac.update_subrange_with(&mut r.latest, op.addr - self.latest_frac.off(), op.data);
-            mself.persist_frac.update_subrange_with(&mut r.persist, op.addr - self.persist_frac.off(), new_state.persist_data);
+            r.latest.update_subrange_with(&mut mself.latest_frac, op.addr as int, op.data);
+            r.persist.update_subrange_with(&mut mself.persist_frac, op.addr as int, new_state.persist_data);
 
             (mself.latest_frac, mself.persist_frac)
         }

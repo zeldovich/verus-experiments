@@ -70,6 +70,26 @@ verus! {
         {
             frac.agree(self)
         }
+
+        pub proof fn update_subrange_with(tracked self: &mut SeqAuth<V>, tracked frac: &mut SeqFrac<V>, off: int, v: Seq<V>)
+            requires
+                old(self).valid(old(frac).id()),
+                old(frac).inv(),
+                old(frac).off() <= off,
+                off + v.len() <= old(frac).off() + old(frac)@.len(),
+            ensures
+                self.valid(old(self).id()),
+                frac.valid(old(frac).id()),
+                frac.off() == old(frac).off(),
+                self@ =~= old(self)@.update_subrange_with(off, v),
+                frac@ =~= old(frac)@.update_subrange_with(off - frac.off(), v),
+        {
+            let tracked mut mid = frac.split(off - frac.off());
+            let tracked mut end = mid.split(v.len() as int);
+            mid.update(self, v);
+            frac.combine(mid);
+            frac.combine(end);
+        }
     }
 
     impl<V> SeqFrac<V> {
@@ -88,6 +108,13 @@ verus! {
         pub open spec fn view(self) -> Seq<V>
         {
             Seq::new(self.len, |i: int| self.frac@[self.off + i])
+        }
+
+        pub open spec fn subrange_abs(self, start_inclusive: int, end_exclusive: int) -> Seq<V>
+            recommends
+                self.off() <= start_inclusive <= end_exclusive <= self.off() + self@.len()
+        {
+            self@.subrange(start_inclusive - self.off(), end_exclusive - self.off())
         }
 
         pub open spec fn off(self) -> nat
@@ -172,27 +199,6 @@ verus! {
             assert(self.frac@.dom() == vmap.dom());
             self.frac.agree(auth);
             self.frac.update(auth, vmap);
-        }
-
-        pub proof fn update_subrange_with(tracked self: &mut SeqFrac<V>, tracked auth: &mut SeqAuth<V>, off: int, v: Seq<V>)
-            requires
-                old(self).valid(old(auth).id()),
-                old(auth).inv(),
-                0 <= off,
-                off + v.len() <= old(self)@.len(),
-            ensures
-                self.valid(auth.id()),
-                self.off() == old(self).off(),
-                auth.inv(),
-                auth.id() == old(auth).id(),
-                self@ =~= old(self)@.update_subrange_with(off, v),
-                auth@ =~= old(auth)@.update_subrange_with(self.off() + off, v),
-        {
-            let tracked mut mid = self.split(off);
-            let tracked mut end = mid.split(v.len() as int);
-            mid.update(auth, v);
-            self.combine(mid);
-            self.combine(end);
         }
 
         pub proof fn split(tracked self: &mut SeqFrac<V>, n: int) -> (tracked result: SeqFrac<V>)
