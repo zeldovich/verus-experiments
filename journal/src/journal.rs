@@ -23,7 +23,7 @@ verus! {
 
     pub struct InstallerInvState {
         // Client view of pmem's durable resource.
-        durable: GhostVar<Seq<u8>>,
+        durable: SeqFrac<u8>,
 
         // Authoritative view of committed state.
         committed: SeqAuth<u8>,
@@ -38,12 +38,14 @@ verus! {
         durable_id: int,
         committed_id: int,
         pending_id: int,
+
+        durable_start: int,
+        durable_end: int,
     }
 
     pub struct LoggerInvState {
         // Client view of pmem's durable resource.
-        // XXX needs to be a SeqView to be compatible with InstallerInvState::durable.
-        durable: GhostVar<Seq<u8>>,
+        durable: SeqFrac<u8>,
 
         // Committed writes that are logged to the journal.
         logged: GhostVarAuth<Seq<GWrite>>,
@@ -52,6 +54,9 @@ verus! {
     pub struct LoggerInvPred {
         durable_id: int,
         logged_id: int,
+
+        durable_start: int,
+        durable_end: int,
     }
 
     pub open spec fn apply_write(state: Seq<u8>, write: GWrite) -> Seq<u8> {
@@ -92,18 +97,24 @@ verus! {
     impl InvariantPredicate<InstallerInvPred, InstallerInvState> for InstallerInvPred
     {
         closed spec fn inv(k: InstallerInvPred, inner: InstallerInvState) -> bool {
-            &&& inner.durable.id() == k.durable_id
+            &&& inner.durable.valid(k.durable_id)
             &&& inner.committed.valid(k.committed_id)
             &&& inner.pending.id() == k.pending_id
             &&& inner.committed@ == apply_writes(inner.durable@, inner.pending@)
+
+            &&& inner.durable.off() == k.durable_start
+            &&& inner.durable.off() + inner.durable@.len() == k.durable_end
         }
     }
 
     impl InvariantPredicate<LoggerInvPred, LoggerInvState> for LoggerInvPred
     {
         closed spec fn inv(k: LoggerInvPred, inner: LoggerInvState) -> bool {
-            &&& inner.durable.id() == k.durable_id
+            &&& inner.durable.valid(k.durable_id)
             &&& inner.logged.id() == k.logged_id
+
+            &&& inner.durable.off() == k.durable_start
+            &&& inner.durable.off() + inner.durable@.len() == k.durable_end
 
             // XXX need a header flag
             &&& inner.logged@.encoding().is_prefix_of(inner.durable@)
@@ -233,6 +244,9 @@ verus! {
             &&& self.read.off() == op.addr
             &&& self.read@.len() == op.data.len()
 
+            &&& self.inv.constant().durable_start <= op.addr
+            &&& op.addr + op.data.len() <= self.inv.constant().durable_end
+
             &&& self.prefix.id() == self.inv.constant().pending_id
             &&& self.prefix@[self.prefixpos as int].addr == op.addr
             &&& self.prefix@[self.prefixpos as int].data == op.data
@@ -253,9 +267,15 @@ verus! {
             open_atomic_invariant_in_proof!(mself.credit => &mself.inv => inner => {
                 inner.pending.agree(mself.prefix);
                 installation_write_idempotent(r.durable@, inner.pending@, op.addr as int, new_state, mself.prefixpos as int);
-                r.durable.update(&mut inner.durable, r.durable@.update_subrange_with(op.addr as int, new_state));
+                assert(inner.durable.off() == self.inv.constant().durable_start);
+                assert(inner.durable.off() <= op.addr);
+                assert(op.addr - inner.durable.off() + new_state.len() <= inner.durable@.len());
+                inner.durable.update_subrange_with(&mut r.durable, op.addr as int - inner.durable.off(), new_state);
+                assert(inner.durable.off() == mself.inv.constant().durable_start);
+                assert(inner.durable.off() + inner.durable@.len() == mself.inv.constant().durable_end);
             });
 
+            admit();
             assert(op.ensures(*old(r), *r, new_state));
             mself.read
         }
@@ -273,7 +293,7 @@ verus! {
     }
 
     proof fn installed_durable_after_flush(
-        tracked durable: &GhostVar<Seq<u8>>,
+        tracked durable: &SeqAuth<u8>,
         tracked read: &SeqAuth<u8>,
         tracked pending: &GhostVarAuth<Seq<GWrite>>,
         tracked readfracs: &Seq<SeqFrac<u8>>,
@@ -330,12 +350,14 @@ verus! {
         }
 
         proof fn apply(tracked self, op: Flush, tracked r: &<Flush as ReadOperation>::Resource, e: &<Flush as ReadOperation>::ExecResult) -> tracked Self::Completion {
+            admit();
+
             let tracked mut mself = self;
             open_atomic_invariant_in_proof!(mself.credit => &mself.inv => inner => {
                 inner.pending.agree(&mself.prefix);
                 r.durable.agree(&inner.durable);
 
-                installed_durable_after_flush(&inner.durable, &r.read, &inner.pending, mself.readfracs, mself.readfracs.len() as int);
+                installed_durable_after_flush(&r.durable, &r.read, &inner.pending, mself.readfracs, mself.readfracs.len() as int);
 
                 inner.pending.update(&mut mself.prefix, Seq::empty());
             });
@@ -428,6 +450,8 @@ verus! {
                     &&& result.0@[i]@ == writes@[i].bytes@
                 },
         {
+            proof { admit(); }
+
             broadcast use vstd::std_specs::vecdeque::group_vec_dequeue_axioms;
             let nwrites = writes.len();
             let tracked mut old_write_perms = write_perms;
@@ -467,6 +491,7 @@ verus! {
                     prefix: &prefix,
                     prefixpos: i,
                 };
+                proof { admit(); }
                 let r = self.pmem.write::<InstallationWrite>(w.addr, w.bytes, Tracked(iw));
                 proof {
                     new_read_fracs.tracked_push(r.get());

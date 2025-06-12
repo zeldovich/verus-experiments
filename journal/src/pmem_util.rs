@@ -1,6 +1,5 @@
 use vstd::prelude::*;
 use vstd::logatom::*;
-use vstd::tokens::frac::*;
 
 use sl::seq_view::*;
 
@@ -9,7 +8,7 @@ use super::pmem::*;
 verus! {
     pub struct Fracs {
         pub read: SeqFrac<u8>,
-        pub durable: GhostVar<Seq<u8>>,
+        pub durable: SeqFrac<u8>,
     }
 
     impl MutLinearizer<Write> for Fracs {
@@ -17,31 +16,35 @@ verus! {
 
         open spec fn pre(self, op: Write) -> bool {
             &&& self.read.valid(op.read_id)
-            &&& self.durable.id() == op.durable_id
+            &&& self.durable.valid(op.durable_id)
 
             &&& op.data.len() > 0
             &&& self.read.off() <= op.addr
             &&& op.addr + op.data.len() <= self.read.off() + self.read@.len()
+
+            &&& self.durable.off() <= op.addr
+            &&& op.addr + op.data.len() <= self.durable.off() + self.durable@.len()
         }
 
         open spec fn post(self, op: Write, e: <Write as MutOperation>::ExecResult, r: Self::Completion) -> bool {
             &&& r.read.valid(op.read_id)
-            &&& r.durable.id() == op.durable_id
+            &&& r.durable.valid(op.durable_id)
 
             &&& r.read.off() == self.read.off()
+            &&& r.durable.off() == self.durable.off()
 
             &&& r.read@ == self.read@.update_subrange_with(op.addr - self.read.off(), op.data)
-            &&& can_result_from_write(r.durable@, self.durable@, op.addr as int, op.data)
+            &&& can_result_from_write(r.durable@, self.durable@, op.addr as int - self.durable.off(), op.data)
         }
 
         proof fn apply(tracked self, op: Write, tracked r: &mut <Write as MutOperation>::Resource, new_state: <Write as MutOperation>::NewState, e: &<Write as MutOperation>::ExecResult) -> tracked Self::Completion {
             let tracked mut mself = self;
 
             mself.read.agree(&r.read);
-            r.durable.agree(&mself.durable);
+            mself.durable.agree(&r.durable);
 
-            mself.read.update_subrange_with(&mut r.read, op.addr as int - mself.read.off(), op.data);
-            r.durable.update(&mut mself.durable, r.durable@.update_subrange_with(op.addr as int, new_state));
+            r.read.update_subrange_with(&mut mself.read, op.addr as int, op.data);
+            r.durable.update_subrange_with(&mut mself.durable, op.addr as int, new_state);
 
             mself
         }
@@ -56,19 +59,22 @@ verus! {
 
         open spec fn pre(self, op: Flush) -> bool {
             &&& self.read.valid(op.read_id)
-            &&& self.durable.id() == op.durable_id
+            &&& self.durable.valid(op.durable_id)
+
+            &&& self.durable.off() <= self.read.off()
+            &&& self.read.off() + self.read@.len() <= self.durable.off() + self.durable@.len()
         }
 
         open spec fn post(self, op: Flush, e: <Flush as ReadOperation>::ExecResult, r: Self::Completion) -> bool {
             &&& r == self
-            &&& r.read@.len() > 0 ==> r.read@ == r.durable@.subrange(r.read.off() as int, r.read.off() + r.read@.len() as int)
+            &&& r.read@.len() > 0 ==> r.read@ =~= r.durable@.subrange(r.read.off() - r.durable.off(), r.read.off() - r.durable.off() + r.read@.len())
         }
 
         proof fn apply(tracked self, op: Flush, tracked r: &<Flush as ReadOperation>::Resource, e: &<Flush as ReadOperation>::ExecResult) -> tracked Self::Completion {
             let tracked mut mself = self;
 
             mself.read.agree(&r.read);
-            r.durable.agree(&mself.durable);
+            mself.durable.agree(&r.durable);
 
             mself
         }
