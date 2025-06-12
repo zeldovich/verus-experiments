@@ -4,6 +4,7 @@ use super::seq_helper::*;
 
 verus! {
     pub struct SeqAuth<V> {
+        pub ghost off: nat,
         pub ghost len: nat,
         pub auth: MapAuth<int, V>,
     }
@@ -18,7 +19,7 @@ verus! {
         pub open spec fn inv(self) -> bool
         {
             &&& self.auth.inv()
-            &&& self.auth@.dom() =~= Set::new(|i: int| 0 <= i < self.len)
+            &&& self.auth@.dom() =~= Set::new(|i: int| self.off <= i < self.off + self.len)
         }
 
         pub open spec fn id(self) -> int
@@ -34,24 +35,38 @@ verus! {
 
         pub open spec fn view(self) -> Seq<V>
         {
-            Seq::new(self.len, |i: int| self.auth@[i])
+            Seq::new(self.len, |i: int| self.auth@[self.off + i])
         }
 
-        pub proof fn new(s: Seq<V>) -> (tracked result: (SeqAuth<V>, SeqFrac<V>))
+        pub open spec fn off(self) -> nat
+        {
+            self.off
+        }
+
+        pub open spec fn subrange_abs(self, start_inclusive: int, end_exclusive: int) -> Seq<V>
+            recommends
+                self.off() <= start_inclusive <= end_exclusive <= self.off() + self@.len()
+        {
+            self@.subrange(start_inclusive - self.off(), end_exclusive - self.off())
+        }
+
+        pub proof fn new(s: Seq<V>, off: nat) -> (tracked result: (SeqAuth<V>, SeqFrac<V>))
             ensures
                 result.0.inv(),
+                result.0.off() == off,
                 result.0@ =~= s,
                 result.1.valid(result.0.id()),
-                result.1.off() == 0,
+                result.1.off() == off,
                 result.1@ =~= s,
         {
-            let tracked (mauth, mfrac) = MapAuth::<int, V>::new(seq_to_map(s, 0));
+            let tracked (mauth, mfrac) = MapAuth::<int, V>::new(seq_to_map(s, off as int));
             let tracked auth = SeqAuth{
+                off: off,
                 len: s.len(),
                 auth: mauth,
             };
             let tracked frac = SeqFrac{
-                off: 0,
+                off: off,
                 len: s.len(),
                 frac: mfrac,
             };
@@ -64,8 +79,9 @@ verus! {
                 frac.inv(),
             ensures
                 frac@.len() > 0 ==> {
-                    &&& frac@ =~= self@.subrange(frac.off() as int, frac.off() + frac@.len() as int)
-                    &&& frac.off() + frac@.len() <= self@.len()
+                    &&& frac@ =~= self@.subrange(frac.off() as int - self.off(), frac.off() - self.off() + frac@.len() as int)
+                    &&& frac.off() >= self.off()
+                    &&& frac.off() + frac@.len() <= self.off() + self@.len()
                 }
         {
             frac.agree(self)
@@ -81,8 +97,10 @@ verus! {
                 self.valid(old(self).id()),
                 frac.valid(old(frac).id()),
                 frac.off() == old(frac).off(),
-                self@ =~= old(self)@.update_subrange_with(off, v),
+                self@ =~= old(self)@.update_subrange_with(off - self.off(), v),
                 frac@ =~= old(frac)@.update_subrange_with(off - frac.off(), v),
+                self.off() == old(self).off(),
+                frac.off() == old(frac).off(),
         {
             let tracked mut mid = frac.split(off - frac.off());
             let tracked mut end = mid.split(v.len() as int);
@@ -133,18 +151,22 @@ verus! {
                 auth.inv(),
             ensures
                 self@.len() > 0 ==> {
-                    &&& self@ =~= auth@.subrange(self.off() as int, self.off() + self@.len() as int)
-                    &&& self.off() + self@.len() <= auth@.len()
+                    &&& self@ =~= auth@.subrange(self.off() as int - auth.off(), self.off() - auth.off() + self@.len() as int)
+                    &&& self.off() >= auth.off()
+                    &&& self.off() + self@.len() <= auth.off() + auth@.len()
                 }
         {
             self.frac.agree(&auth.auth);
 
             if self@.len() > 0 {
+                assert(self.frac@.contains_key(self.off as int));
+                assert(auth.auth@.contains_key(self.off as int));
+
                 assert(self.frac@.contains_key(self.off + self.len - 1));
                 assert(auth.auth@.contains_key(self.off + self.len - 1));
-                assert(self.off + self.len - 1 < auth@.len());
+                assert(self.off - auth.off + self.len - 1 < auth@.len());
 
-                assert forall|i: int| 0 <= i < self.len implies #[trigger] self.frac@[self.off + i] == auth@[self.off + i] by {
+                assert forall|i: int| 0 <= i < self.len implies #[trigger] self.frac@[self.off + i] == auth@[self.off - auth.off + i] by {
                     assert(self.frac@.contains_key(self.off + i));
                     assert(auth.auth@.contains_key(self.off + i));
                 };
@@ -176,7 +198,9 @@ verus! {
                 auth.inv(),
                 auth.id() == old(auth).id(),
                 self@ =~= v,
-                auth@ =~= old(auth)@.update_subrange_with(self.off() as int, v),
+                auth@ =~= old(auth)@.update_subrange_with(self.off() - auth.off(), v),
+                self.off() == old(self).off(),
+                auth.off() == old(auth).off(),
         {
             self.update_map(&mut auth.auth, v);
         }

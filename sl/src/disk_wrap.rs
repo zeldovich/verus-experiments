@@ -40,6 +40,8 @@ verus! {
         open spec fn requires(self, pre: Self::Resource, new_state: Self::NewState, e: ()) -> bool {
             &&& pre.latest.valid(self.id)
             &&& pre.persist.valid(self.persist_id)
+            &&& pre.latest.off() == 0
+            &&& pre.persist.off() == 0
             &&& can_result_from_write(new_state.persist_data,
                                       if self.data.len() > 0 { pre.persist@.subrange(self.addr as int, self.addr+self.data.len()) } else { Seq::empty() },
                                       0, self.data)
@@ -48,12 +50,15 @@ verus! {
         open spec fn ensures(self, pre: Self::Resource, post: Self::Resource, new_state: Self::NewState) -> bool {
             &&& post.latest.valid(self.id)
             &&& post.persist.valid(self.persist_id)
+            &&& post.latest.off() == 0
+            &&& post.persist.off() == 0
             &&& post.latest@ =~= pre.latest@.update_subrange_with(self.addr as int, self.data)
             &&& post.persist@ =~= pre.persist@.update_subrange_with(self.addr as int, new_state.persist_data)
         }
 
         open spec fn peek_requires(self, r: Self::Resource) -> bool {
             &&& r.latest.valid(self.id)
+            &&& r.latest.off() == 0
         }
 
         open spec fn peek_ensures(self, r: Self::Resource) -> bool {
@@ -74,6 +79,8 @@ verus! {
             &&& r.latest.valid(self.id)
             &&& r.persist.valid(self.persist_id)
             &&& r.latest@ == r.persist@
+            &&& r.latest.off() == 0
+            &&& r.persist.off() == 0
         }
     }
 
@@ -89,11 +96,13 @@ verus! {
 
         open spec fn requires(self, r: Self::Resource, e: Self::ExecResult) -> bool {
             &&& r.valid(self.id)
+            &&& r.off() == 0
             &&& e@ == if self.len > 0 { r@.subrange(self.addr as int, self.addr + self.len as int) } else { Seq::empty() }
         }
 
         open spec fn peek_requires(self, r: Self::Resource) -> bool {
             &&& r.valid(self.id)
+            &&& r.off() == 0
         }
 
         open spec fn peek_ensures(self, r: Self::Resource) -> bool {
@@ -110,6 +119,9 @@ verus! {
             &&& self.r@.latest@ =~= self.d@
             &&& self.r@.persist@ =~= self.d.persist()
             &&& self.r@.latest@.len() == self.r@.persist@.len()
+
+            &&& self.r@.latest.off() == 0
+            &&& self.r@.persist.off() == 0
 
             &&& self.writeset_auth@.inv()
             &&& self.writeset_auth@@.dom() == self.writeset_latest_frac@@.dom()
@@ -206,8 +218,8 @@ verus! {
                 result.2@.off() == 0,
                 result.2@@ == d.persist(),
         {
-            let tracked (ar, fr) = SeqAuth::<u8>::new(d@);
-            let tracked (par, pfr) = SeqAuth::<u8>::new(d.persist());
+            let tracked (ar, fr) = SeqAuth::<u8>::new(d@, 0);
+            let tracked (par, pfr) = SeqAuth::<u8>::new(d.persist(), 0);
 
             let tracked (writeset_ar, writeset_fr) = MapAuth::new(Map::empty());
             let tracked writeset_latest_frac = ar.auth.empty();
