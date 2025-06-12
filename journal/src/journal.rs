@@ -270,9 +270,10 @@ verus! {
                 assert(inner.durable.off() == self.inv.constant().durable_start);
                 assert(inner.durable.off() <= op.addr);
                 assert(op.addr - inner.durable.off() + new_state.len() <= inner.durable@.len());
-                inner.durable.update_subrange_with(&mut r.durable, op.addr as int - inner.durable.off(), new_state);
+                r.durable.update_subrange_with(&mut inner.durable, op.addr as int, new_state);
                 assert(inner.durable.off() == mself.inv.constant().durable_start);
                 assert(inner.durable.off() + inner.durable@.len() == mself.inv.constant().durable_end);
+                assert(InstallerInvPred::inv(mself.inv.constant(), inner));
             });
 
             admit();
