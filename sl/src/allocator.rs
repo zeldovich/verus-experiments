@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use vstd::prelude::*;
 
 #[cfg(verus_keep_ghost)]
-use vstd::std_specs::hash::IterAdditionalSpecFns;
+use vstd::std_specs::hash::SetIterAdditionalSpecFns;
 
 verus! {
     broadcast use vstd::std_specs::hash::group_hash_axioms;
