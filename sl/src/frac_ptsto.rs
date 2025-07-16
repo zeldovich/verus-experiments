@@ -22,7 +22,7 @@ verus! {
     }
 
     impl<T, const TOTAL: u64> InvariantPredicate<Pred, Inner<T, TOTAL>> for Pred {
-        open spec fn inv(k: Pred, inner: Inner<T, TOTAL>) -> bool {
+        closed spec fn inv(k: Pred, inner: Inner<T, TOTAL>) -> bool {
             match inner {
                 Inner::Present { frac, ptsto } => {
                     &&& frac.valid(k.frac_id, 1)
